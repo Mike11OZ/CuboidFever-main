@@ -16,7 +16,7 @@ public class Chunk
     public bool Unloaded;
 
     // ---- Water Wave Configuration ----
-    public static float WaterWaveIntensity = 0.05f; // Easily alterable at runtime
+    public static float WaterWaveIntensity = 1.0f; // Easily alterable at runtime
     public static float WaterWaveSpeed = 0.8f;      // New: controls how fast the waves animate (try 0.5f to 1.0f)
     private static readonly PerlinNoise WaterNoise = new(new Random(1337));
 
@@ -136,6 +136,7 @@ public class Chunk
 
     // Light level -> brightness. Each level is 80% of the one above (like Minecraft).
     public static readonly float[] Curve = BuildCurve();
+
     private static float[] BuildCurve()
     {
         var c = new float[16];
@@ -147,7 +148,7 @@ public class Chunk
     public void ApplyMesh(GraphicsDevice device, MeshData m)
     {
         _solid.Upload(device, m.SolidV, m.SolidI);
-        _water.Upload(device, m.WaterV, m.WaterI, m.WaterF);
+        _water.Upload(device, m.WaterV, m.WaterI, m.WaterF, m.WaterW);
     }
 
     public void DisposeMesh()
@@ -158,7 +159,13 @@ public class Chunk
 
     public void DrawSolid(GraphicsDevice device) => _solid.Draw(device);
     public void DrawWater(GraphicsDevice device) => _water.Draw(device);
-    public void UpdateWater(Vector3 cam, float time) => _water.Update(cam, time);
+
+    public void UpdateWater(Vector3 cam, float time)
+    {
+        Vector3 center = new Vector3(CX * Size + 8f, CY * Size + 8f, CZ * Size + 8f);
+        _water.Update(cam, time, center);
+    }
+
     private class GpuMesh
     {
         private VertexBuffer _vb;
@@ -195,19 +202,28 @@ public class Chunk
             device.DrawIndexedPrimitives(PrimitiveType.TriangleList, 0, 0, _tris);
         }
     }
+
     // Water mesh whose vertex alpha and wave height are dynamically updated
     private class WaterMesh
     {
-        private const float AlphaMin = 0.45f;        
-        private const float AlphaMax = 0.95f;        
+        private const float AlphaMin = 0.45f;
+        private const float AlphaMax = 0.95f;
+
+        // Distance fade thresholds for smooth distant horizon tapering
+        private const float FadeStartDist = 45f;
+        private const float FadeEndDist = 75f;
+        private const float FadeStartDistSq = FadeStartDist * FadeStartDist;
+        private const float FadeEndDistSq = FadeEndDist * FadeEndDist;
 
         private DynamicVertexBuffer _vb;
         private IndexBuffer _ib;
         private VertexPositionColorTexture[] _verts;
-        private VertexPositionColorTexture[] _baseVerts; // Store unperturbed base vertices
-        private Color[] _base;   
-        private byte[] _face;    
+        private VertexPositionColorTexture[] _baseVerts;
+        private float[] _shoreWeights; // Per-vertex shoreline constraint from the mesher
+        private Color[] _base;
+        private byte[] _face;
         private int _tris;
+        private float _lastUpdateTime = -1f;
 
         public bool HasData => _vb != null;
 
@@ -216,66 +232,144 @@ public class Chunk
             _vb?.Dispose();
             _ib?.Dispose();
             _vb = null; _ib = null;
-            _verts = null; _baseVerts = null; _base = null; _face = null;
+            _verts = null; _baseVerts = null; _shoreWeights = null; _base = null; _face = null;
             _tris = 0;
         }
 
-        public void Upload(GraphicsDevice device, VertexPositionColorTexture[] v, int[] idx, byte[] faces)
+        public void Upload(
+            GraphicsDevice device,
+            VertexPositionColorTexture[] v,
+            int[] idx,
+            byte[] faces,
+            float[] shoreWeights)
         {
             Clear();
-            if (v == null || idx == null || idx.Length == 0 || faces == null) return;
+            if (v == null || idx == null || idx.Length == 0 || faces == null || shoreWeights == null)
+                return;
+
+            if (faces.Length != v.Length || shoreWeights.Length != v.Length)
+                throw new ArgumentException("Water vertex metadata must match the water vertex count.");
 
             _verts = v;
             _face = faces;
-            
-            // Save a backup of the original vertex positions and attributes
+            _shoreWeights = shoreWeights;
             _baseVerts = new VertexPositionColorTexture[v.Length];
             Array.Copy(v, _baseVerts, v.Length);
 
+            // Keep the original mesh surface as the baseline. A blanket recession here
+            // makes the side faces disagree with the top and is no longer needed.
             _base = new Color[v.Length];
             for (int i = 0; i < v.Length; i++) _base[i] = v[i].Color;
 
             _tris = idx.Length / 3;
-            _vb = new DynamicVertexBuffer(device, typeof(VertexPositionColorTexture), v.Length, BufferUsage.WriteOnly);
-            _ib = new IndexBuffer(device, IndexElementSize.ThirtyTwoBits, idx.Length, BufferUsage.WriteOnly);
+            _vb = new DynamicVertexBuffer(
+                device,
+                typeof(VertexPositionColorTexture),
+                v.Length,
+                BufferUsage.WriteOnly);
+
+            _ib = new IndexBuffer(
+                device,
+                IndexElementSize.ThirtyTwoBits,
+                idx.Length,
+                BufferUsage.WriteOnly);
+
             _ib.SetData(idx);
+            _vb.SetData(_verts, 0, _verts.Length, SetDataOptions.Discard);
+            _lastUpdateTime = float.NegativeInfinity;
         }
 
-        public void Update(Vector3 cam, float time)
+        public void Update(Vector3 cam, float time, Vector3 chunkCenter)
         {
             if (_vb == null) return;
+
+            // Throttle updates to ~30 FPS
+            if (time - _lastUpdateTime < 0.033f) return;
+            _lastUpdateTime = time;
 
             float intensity = WaterWaveIntensity;
             bool animateWaves = intensity > 0.0001f;
 
             for (int i = 0; i < _verts.Length; i++)
             {
-                // 1. Apply Perlin noise wave displacement ONLY to top water faces (face index 2 = +Y)
-                if (animateWaves && _face[i] == 2)
+                Vector3 basePos = _baseVerts[i].Position;
+
+                // The mesher assigns matching wave weights to top-surface vertices and
+                // their upper side-edge copies. Lower side edges and bottoms have weight 0.
+                float waveWeight = _shoreWeights[i];
+
+                if (animateWaves && waveWeight > 0f)
                 {
-                    Vector3 basePos = _baseVerts[i].Position;
-                    // Sample noise using world XZ coordinates and time for smooth movement
-                    float noise = (float)WaterNoise.Noise(basePos.X * 0.35, basePos.Z * 0.35, time * WaterWaveSpeed);
-                    _verts[i].Position.Y = basePos.Y + noise * intensity;
+                    float distToCamSq = Vector3.DistanceSquared(cam, basePos);
+
+                    if (distToCamSq < FadeEndDistSq)
+                    {
+                        float noise = (float)WaterNoise.Noise(
+                            basePos.X * 0.35,
+                            basePos.Z * 0.35,
+                            time * WaterWaveSpeed);
+
+                        // Smoothstep distance fade avoids a visible slope change at fade limits.
+                        float fadeFactor = 1f;
+
+                        if (distToCamSq > FadeStartDistSq)
+                        {
+                            float dist = MathF.Sqrt(distToCamSq);
+                            float t = MathHelper.Clamp(
+                                (dist - FadeStartDist) / (FadeEndDist - FadeStartDist),
+                                0f,
+                                1f);
+
+                            fadeFactor = 1f - t * t * (3f - 2f * t);
+                        }
+
+                        // Weight 2 marks a surface beneath an occluding block: it may
+                        // move downward, but must never rise through the block's underside.
+                        float displacement = noise * intensity * fadeFactor *
+                            (waveWeight > 1f ? 1f : waveWeight);
+
+                        if (waveWeight > 1f)
+                            displacement = MathF.Min(0f, displacement);
+
+                        _verts[i].Position = new Vector3(
+                            basePos.X,
+                            basePos.Y + displacement,
+                            basePos.Z);
+                    }
+                    else
+                    {
+                        _verts[i].Position = basePos;
+                    }
                 }
                 else
                 {
-                    _verts[i].Position = _baseVerts[i].Position;
+                    _verts[i].Position = basePos;
                 }
 
-                // 2. Existing Fresnel-style alpha calculation
+                // Robust Fresnel alpha calculation
                 Vector3 d = cam - _verts[i].Position;
-                float dist = d.Length();
-                float along = _face[i] < 2 ? d.X : _face[i] < 4 ? d.Y : d.Z; 
-                float cos = dist > 0.001f ? MathF.Abs(along) / dist : 1f;
+                float distSq = d.LengthSquared();
+                if (distSq < 0.0001f) distSq = 0.0001f;
+
+                float along = _face[i] < 2 ? d.X : _face[i] < 4 ? d.Y : d.Z;
+                float cos = MathF.Abs(along) / MathF.Sqrt(distSq);
+                if (cos > 1.0f) cos = 1.0f;
 
                 float k = 1f - cos;
-                k *= k; k *= k;                                
+                k *= k * k;
+
                 float a = AlphaMin + (AlphaMax - AlphaMin) * k;
+                if (a < AlphaMin) a = AlphaMin;
+                if (a > AlphaMax) a = AlphaMax;
 
                 Color c = _base[i];
-                _verts[i].Color = new Color(c.R / 255f * a, c.G / 255f * a, c.B / 255f * a, a); 
+                _verts[i].Color = new Color(
+                    c.R / 255f * a,
+                    c.G / 255f * a,
+                    c.B / 255f * a,
+                    a);
             }
+
             _vb.SetData(_verts, 0, _verts.Length, SetDataOptions.Discard);
         }
 

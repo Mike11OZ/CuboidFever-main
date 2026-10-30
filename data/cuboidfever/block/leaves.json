@@ -2,6 +2,7 @@
   "name": "cuboidfever:leaves",
   "solid": true,
   "transparent": true,
+  "fullBlock": true,
   "replaceable": true,
   "emissive": false,
   "emission": {

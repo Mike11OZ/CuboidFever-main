@@ -13,6 +13,7 @@ public sealed class MeshData
     public VertexPositionColorTexture[] SolidV, WaterV;
     public int[] SolidI, WaterI;
     public byte[] WaterF;
+    public float[] WaterW; // Per-vertex wave weight, constrained at solid shorelines
 }
 
 public static class ChunkMesher
@@ -90,6 +91,10 @@ public static class ChunkMesher
     private static readonly Vector2[] BottomUV = { new(0, 0), new(0, 1), new(1, 1), new(1, 0) };
     private static readonly float[] FaceShade = { 0.8f, 0.8f, 1.0f, 0.5f, 0.65f, 0.65f };
 
+    // Water occupies slightly less than a full block, leaving a visible gap beneath
+    // opaque blocks above it (Minecraft-style partial-height water).
+    private const float WaterSurfaceInset = 0.125f;
+
     // For each padded coordinate 0..17: which column it falls in (-1, 0, +1) and its local coordinate
     private static readonly int[] ColOff = new int[P];
     private static readonly int[] LocalOf = new int[P];
@@ -106,16 +111,20 @@ public static class ChunkMesher
     private sealed class Builder
     {
         public readonly List<byte> F = new();
+        public readonly List<float> W = new();
         public readonly List<VertexPositionColorTexture> V = new();
         public readonly List<int> I = new();
 
-        public void Clear() { V.Clear(); I.Clear(); F.Clear(); }
+        public void Clear() { V.Clear(); I.Clear(); F.Clear(); W.Clear(); }
 
-    
-        public void AddFace(int f, Vector3 pos, Color color, TextureRegion region, float[] ao)
+        public void AddFace(int f, Vector3 pos, Color color, TextureRegion region, float[] ao, float[] waveWeights, bool isWater)
         {
             int start = V.Count;
-            for (int c = 0; c < 4; c++) F.Add((byte)f);   // face index per vertex, for the water Fresnel
+            for (int c = 0; c < 4; c++)
+            {
+                F.Add((byte)f); // face index per vertex, for water Fresnel
+                W.Add(waveWeights[c]);
+            }
 
             float insetU = BlockRegistry.Instance.InsetU;
             float insetV = BlockRegistry.Instance.InsetV;
@@ -132,8 +141,16 @@ public static class ChunkMesher
                     region.V0 + insetV + uvs[c].Y * (heightV - 2f * insetV));
 
                 float k = ao[c];
+                Vector3 vertexPos = FaceCorners[f][c] + pos;
+
+                // Keep water's top surface and the upper edges of its side faces aligned.
+                // A global partial-height surface leaves a real gap under an opaque block,
+                // so the water top texture is not coplanar with the block's underside.
+                if (isWater && f != 3 && FaceCorners[f][c].Y > 0.5f)
+                    vertexPos.Y -= WaterSurfaceInset;
+
                 V.Add(new VertexPositionColorTexture(
-                    FaceCorners[f][c] + pos, new Color(r * k, g * k, b * k, a), uv));
+                    vertexPos, new Color(r * k, g * k, b * k, a), uv));
             }
 
             // Split the quad along the diagonal joining the darker pair of corners,
@@ -150,6 +167,7 @@ public static class ChunkMesher
             }
         }
     }
+
     // Each thread keeps its own scratch buffers, so meshing allocates almost nothing
     private sealed class Buffers
     {
@@ -159,7 +177,6 @@ public static class ChunkMesher
     }
 
     [ThreadStatic] private static Buffers _buf;
-
 
     private static bool ShouldDrawFace(in BlockInfo self, in BlockInfo nb)
     {
@@ -195,6 +212,45 @@ public static class ChunkMesher
 
         return false;
     }
+
+    // A water-surface vertex is constrained when a solid block touches that exact
+    // horizontal grid corner at the water's level. The same world corner is evaluated
+    // for top faces and upper side edges, so their wave displacement stays identical.
+    private static float ShoreWaveWeight(byte[] blocks, BlockInfo[] info, int cell, Vector3 corner)
+    {
+        int dx = corner.X < 0.5f ? -1 : 1;
+        int dz = corner.Z < 0.5f ? -P : P;
+        int xNeighbor = cell + dx;
+        int zNeighbor = cell + dz;
+        int diagonal = cell + dx + dz;
+
+        // If this water column is directly beneath an occluding block, keep the
+        // surface animated but only allow it to move down from its baseline.
+        // Return 2 as a compact per-vertex flag consumed by WaterMesh.Update().
+        if (info[blocks[cell + PP]].Occludes)
+            return 2f;
+
+        // If a neighboring column sharing this corner is covered, the shared
+        // vertex must use the same downward-only constraint to avoid cracks.
+        if (info[blocks[xNeighbor + PP]].Occludes ||
+            info[blocks[zNeighbor + PP]].Occludes ||
+            info[blocks[diagonal + PP]].Occludes)
+            return 2f;
+
+        if (TouchesSolid(blocks, info, cell) ||
+            TouchesSolid(blocks, info, xNeighbor) ||
+            TouchesSolid(blocks, info, zNeighbor) ||
+            TouchesSolid(blocks, info, diagonal))
+            return 0f;
+
+        return 1f;
+    }
+
+    private static bool TouchesSolid(byte[] blocks, BlockInfo[] info, int cell)
+    {
+        return info[blocks[cell]].Occludes || info[blocks[cell + PP]].Occludes;
+    }
+
     // cols = the 3x3 columns around the chunk, index (dz + 1) * 3 + (dx + 1); center is 4
     public static MeshData Build(Chunk chunk, Column[] cols, int version)
     {
@@ -211,6 +267,7 @@ public static class ChunkMesher
         var registry = BlockRegistry.Instance;
         var info = registry.Info;
         var ao = new float[4];
+        var waveWeights = new float[4];
 
         for (int y = 0; y < Chunk.Size; y++)
         for (int z = 0; z < Chunk.Size; z++)
@@ -228,10 +285,18 @@ public static class ChunkMesher
             {
                 int n = i + Offsets[f];
                 byte nbId = b.Blocks[n];
-                bool draw = self.IsLeaves && info[nbId].IsLeaves
-                    ? LeafFaceVisible(b.Blocks, info, n, Offsets[f])
-                    : ShouldDrawFace(in self, in info[nbId]);
+
+                // Water is a partial-height block, so preserve its top face even
+                // beneath an opaque block. AddFace lowers the surface by WaterSurfaceInset,
+                // leaving a real gap below the block; covered waves are downward-only.
+                bool draw = self.IsWater && f == 2 && info[nbId].Occludes
+                    ? true
+                    : self.IsLeaves && info[nbId].IsLeaves
+                        ? LeafFaceVisible(b.Blocks, info, n, Offsets[f])
+                        : ShouldDrawFace(in self, in info[nbId]);
+
                 if (!draw) continue;
+
                 float[] faceAo = Flat;
                 if (AmbientOcclusion && !self.IsWater && !self.Emissive)
                 {
@@ -239,17 +304,46 @@ public static class ChunkMesher
                     faceAo = ao;
                 }
 
-                builder.AddFace(f, pos, LightColor(in self, f, n, b.Light), registry.FastRegion(id, f), faceAo);
+                if (self.IsWater)
+                {
+                    for (int v = 0; v < 4; v++)
+                    {
+                        Vector3 corner = FaceCorners[f][v];
+                        bool followsSurface = f == 2 || (f != 3 && corner.Y > 0.5f);
+                        waveWeights[v] = followsSurface
+                            ? ShoreWaveWeight(b.Blocks, info, i, corner)
+                            : 0f;
+                    }
+                }
+                else
+                {
+                    Array.Clear(waveWeights, 0, waveWeights.Length);
+                }
+
+                int lightSample = self.IsWater && f == 2 && info[nbId].Occludes
+                    ? i
+                    : n;
+
+                var color = LightColor(in self, f, lightSample, b.Light);
+
+                builder.AddFace(f,pos,color,registry.FastRegion(id, f),faceAo,waveWeights,self.IsWater);
             }
         }
 
-        if (b.Solid.I.Count > 0) { result.SolidV = b.Solid.V.ToArray(); result.SolidI = b.Solid.I.ToArray(); }
+        if (b.Solid.I.Count > 0)
+        {
+            result.SolidV = b.Solid.V.ToArray();
+            result.SolidI = b.Solid.I.ToArray();
+        }
+
         if (b.Water.I.Count > 0)
         {
             result.WaterV = b.Water.V.ToArray();
             result.WaterI = b.Water.I.ToArray();
             result.WaterF = b.Water.F.ToArray();
+            result.WaterW = b.Water.W.ToArray();
         }
+
         return result;
     }
 
@@ -293,10 +387,12 @@ public static class ChunkMesher
                     int lx = LocalOf[px];
                     b.Blocks[i] = col.GetBlock(lx, wy, lz);
                     int li = Column.LIdx(lx, wy, lz);
+
                     // Light is only read for cells next to the chunk, so skip the outer padding
                     bool lit = py >= Pad - 1 && py <= Pad + Chunk.Size
                             && pz >= Pad - 1 && pz <= Pad + Chunk.Size
                             && px >= Pad - 1 && px <= Pad + Chunk.Size;
+
                     if (lit)
                     {
                         b.Light[0][i] = col.Light[0][li];
@@ -310,7 +406,6 @@ public static class ChunkMesher
     }
 
     // Vertex color = light (sampled from the cell in front of the face) x face shade
-
     private static Color LightColor(in BlockInfo self, int face, int n, byte[][] light)
     {
         if (self.Emissive)
@@ -325,5 +420,4 @@ public static class ChunkMesher
 
         return new Color(r, g, bl, 1f);
     }
-
 }

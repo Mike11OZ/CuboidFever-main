@@ -9,7 +9,7 @@ namespace CuboidFever;
 
 public struct BlockInfo
 {
-    public bool Transparent, Solid, Emissive, Occludes;
+    public bool Transparent, Solid, FullBlock, Emissive, Occludes;
     public bool IsAir, IsWater, IsGlass, IsLeaves;
     public float TintR, TintG, TintB;   // 0-1, used by emissive blocks
     
@@ -42,6 +42,7 @@ public sealed class BlockRegistry
             {
                 Transparent = def.Transparent,
                 Solid = def.Solid,
+                FullBlock = def.FullBlock,
                 Emissive = def.Emissive,
                 Occludes = def.Solid && !def.Transparent,
                 IsAir = name.Equals("cuboidfever:air", StringComparison.OrdinalIgnoreCase),

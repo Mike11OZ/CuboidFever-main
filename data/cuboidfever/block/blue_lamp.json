@@ -2,6 +2,7 @@
   "name": "cuboidfever:blue_lamp",
   "solid": true,
   "transparent": false,
+  "fullBlock": true,
   "replaceable": false,
   "emissive": true,
   "emission": { "r": 0, "g": 0, "b": 15 },

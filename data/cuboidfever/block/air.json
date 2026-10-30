@@ -2,6 +2,7 @@
   "name": "cuboidfever:air",
   "solid": false,
   "transparent": true,
+  "fullBlock": true,
   "replaceable": true,
   "emissive": false,
   "emission": {

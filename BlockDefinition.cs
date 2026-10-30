@@ -13,6 +13,11 @@ public class BlockDefinition
     public bool Transparent { get; set; }
     public bool Replaceable { get; set; }
     public bool Emissive { get; set; }
+
+    // Whether this block occupies an entire voxel.
+    // Defaults to true for compatibility with existing block JSON files.
+    public bool FullBlock { get; set; } = true;
+
     public string RenderLayer { get; set; } = "opaque";
 
     public EmissionData Emission { get; set; } = new();
@@ -38,7 +43,7 @@ public class ColorData
 
     public ColorData() { }
     public ColorData(int r, int g, int b) => (R, G, B) = (r, g, b);
-    
+
     public Color ToXnaColor() => new Color(R, G, B);
 }
 

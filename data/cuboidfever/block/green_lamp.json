@@ -2,6 +2,7 @@
   "name": "cuboidfever:green_lamp",
   "solid": true,
   "transparent": false,
+  "fullBlock": true,
   "replaceable": false,
   "emissive": true,
   "emission": { "r": 0, "g": 15, "b": 0 },

@@ -27,7 +27,7 @@ public class TerrainGenerator
     private readonly int _seed;
 
     private readonly OctaveNoise _low, _high, _select, _sandNoise,
-        _stoneDepth, _scale2D, _depth2D;
+        _stoneDepth, _scale2D, _depth2D, _continentalNoise;
 
     public TerrainGenerator(int seed)
     {
@@ -55,6 +55,7 @@ public class TerrainGenerator
         _stoneDepth = new OctaveNoise(r, 4);
         _scale2D = new OctaveNoise(r, 10);
         _depth2D = new OctaveNoise(r, 16);
+        _continentalNoise = new OctaveNoise(r, 4);
     }
 
     public void GenerateColumn(int cx, int cz, byte[,,] col)
@@ -164,13 +165,21 @@ public class TerrainGenerator
                 _depth2D.Sample(
                     cellX * 200, 10, cellZ * 200) / 8000.0);
 
+            // Macro-scale continentalness (sampled once per lattice column)
+            // Tweak the divisor (2000.0) to make continents larger or smaller.
+            double continentalness = _continentalNoise.Sample(
+                cellX * 4 / 2000.0, 
+                0, 
+                cellZ * 4 / 2000.0);
+
             double variation =
                 Math.Clamp(
                     (scaleN + 256) / 512 * Roughness,
                     0, 1) * 0.9 + 0.1;
 
+            // Height offset now incorporates continental noise safely
             double heightOffset =
-                BaseHeight + depthN * DepthInfluence;
+                BaseHeight + (continentalness * 0.5) + (depthN * DepthInfluence);
 
             double centerCell =
                 GY / 2.0 + heightOffset * (GY / 16.0) * 4.0;

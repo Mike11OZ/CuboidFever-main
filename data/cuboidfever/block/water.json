@@ -2,6 +2,7 @@
   "name": "cuboidfever:water",
   "solid": false,
   "transparent": true,
+  "fullBlock": false,
   "replaceable": true,
   "emissive": false,
   "emission": {

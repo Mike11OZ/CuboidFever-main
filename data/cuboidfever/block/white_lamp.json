@@ -2,6 +2,7 @@
   "name": "cuboidfever:white_lamp",
   "solid": true,
   "transparent": false,
+  "fullBlock": true,
   "replaceable": false,
   "emissive": true,
   "emission": { "r": 15, "g": 15, "b": 15 },

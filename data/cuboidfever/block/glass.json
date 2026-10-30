@@ -2,6 +2,7 @@
   "name": "cuboidfever:glass",
   "solid": true,
   "transparent": true,
+  "fullBlock": true,
   "replaceable": false,
   "emissive": false,
   "emission": {

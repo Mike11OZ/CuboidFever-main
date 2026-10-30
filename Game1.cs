@@ -199,7 +199,6 @@ public class Game1 : Game
 
     private void UpdateCamera(KeyboardState kb, float dt)
     {
-        // Toggle capture with Escape or Tab if needed, or check IsActive
         if (IsActive)
         {
             InputManager.GetMouseDelta(out int dx, out int dy);
@@ -216,12 +215,10 @@ public class Game1 : Game
         _forward = Vector3.Transform(Vector3.Forward, rotation);
         Vector3 right = Vector3.Transform(Vector3.Right, rotation);
 
-        // V toggles fly mode
         bool vDown = kb.IsKeyDown(Keys.V);
         if (vDown && !_vWasDown) _player.Flying = !_player.Flying;
         _vWasDown = vDown;
 
-        // Walking moves along the ground plane; flying moves where you look
         Vector3 fwd = _forward, rgt = right;
         if (!_player.Flying)
         {
@@ -243,7 +240,6 @@ public class Game1 : Game
         if (_player.Flying || groundLoaded)
             _player.Update(_world, dt, wish, kb.IsKeyDown(Keys.Space), vertical);
 
-        // Respawn if you fall out of the world
         if (_player.Position.Y < -20) _player.Position = new Vector3(128.5f, 120f, 128.5f);
 
         _camPos = _player.Eye;
@@ -261,7 +257,6 @@ public class Game1 : Game
 
     private void HandleBlockInteraction(MouseState mouse)
     {
-        // Target the block under the crosshair using the configurable reach distance
         _hasTarget = _world.Raycast(_camPos, _forward, ReachDistance, out _target, out _targetPrev);
         if (!IsActive || !_hasTarget) return;
 
@@ -279,7 +274,6 @@ public class Game1 : Game
         }
         if (rightClick && _targetPrev != _target)
         {
-            // Don't place a block inside the player's body
             if (!_player.Overlaps(_targetPrev.x, _targetPrev.y, _targetPrev.z))
                 _world.SetBlock(_targetPrev.x, _targetPrev.y, _targetPrev.z, _hotbar[_slot]);
         }
@@ -304,7 +298,6 @@ public class Game1 : Game
 
     private void DrawWorld(BoundingFrustum frustum)
     {
-        // Pass 1: opaque blocks
         GraphicsDevice.BlendState = BlendState.Opaque;
         GraphicsDevice.DepthStencilState = DepthStencilState.Default;
         GraphicsDevice.RasterizerState = RasterizerState.CullCounterClockwise;
@@ -315,14 +308,12 @@ public class Game1 : Game
         }
         if (_hasTarget) DrawTargetOutline();
 
-        // Draw particles with frustum culling applied (Single clean draw call)
         var rotation = Matrix.CreateFromYawPitchRoll(_yaw, _pitch, 0);
         Vector3 camRight = Vector3.Transform(Vector3.Right, rotation);
         Vector3 camUp = Vector3.Transform(Vector3.Up, rotation);
         
         _particleSystem.Draw(GraphicsDevice, _effect, frustum, camRight, camUp);
 
-        // Pass 2: water, blended over the top...
         GraphicsDevice.BlendState = BlendState.AlphaBlend;
         GraphicsDevice.DepthStencilState = DepthStencilState.DepthRead;
         GraphicsDevice.RasterizerState = RasterizerState.CullNone;
@@ -335,15 +326,12 @@ public class Game1 : Game
 
     private void DrawHud()
     {
-        // PointClamp keeps the pixel art sharp when the tile is scaled up
         _sprites.Begin(samplerState: SamplerState.PointClamp);
 
-        // Crosshair
         int cx = GraphicsDevice.Viewport.Width / 2, cy = GraphicsDevice.Viewport.Height / 2;
         _sprites.Draw(_pixel, new Rectangle(cx - 8, cy - 1, 16, 2), Color.White);
         _sprites.Draw(_pixel, new Rectangle(cx - 1, cy - 8, 2, 16), Color.White);
 
-        // Selected block preview (bottom-left)
         const int size = 64, pad = 16, border = 4;
         var region = BlockRegistry.Instance.GetTextureRegion(_hotbar[_slot], 0);
         var src = region.PixelBounds;
@@ -360,7 +348,6 @@ public class Game1 : Game
         var min = new Vector3(_target.x, _target.y, _target.z) - new Vector3(0.002f);
         var max = min + new Vector3(1.004f);
 
-        // Corner i: bit 0 = x, bit 1 = y, bit 2 = z
         var p = new Vector3[8];
         for (int i = 0; i < 8; i++)
             p[i] = new Vector3((i & 1) == 0 ? min.X : max.X,
@@ -379,8 +366,6 @@ public class Game1 : Game
             GraphicsDevice.DrawUserPrimitives(PrimitiveType.LineList, v, 0, 12);
         }
     }
-
-    // =====================  FPS / TITLE  =====================
 
     private void UpdateTitle(GameTime gameTime)
     {
