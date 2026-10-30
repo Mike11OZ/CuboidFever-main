@@ -206,8 +206,9 @@ public static class ChunkMesher
             idx += step;
             ref readonly BlockInfo bi = ref info[blocks[idx]];
 
-            if (bi.IsAir) return true;
-            if (!bi.IsLeaves) return false;
+            // Only more leaves keep the scan going. Air, stone, logs, water, etc.
+            // all end it, and the face is drawn, so placed blocks no longer erase back faces.
+            if (!bi.IsLeaves) return true;
         }
 
         return false;

@@ -19,6 +19,8 @@ public class Chunk
     public static float WaterWaveIntensity = 1.0f; // Easily alterable at runtime
     public static float WaterWaveSpeed = 0.8f;      // New: controls how fast the waves animate (try 0.5f to 1.0f)
     private static readonly PerlinNoise WaterNoise = new(new Random(1337));
+    public static float WaterFoamThreshold = 0.25f;  // upward displacement (blocks) where foam begins
+    public static float WaterFoamSoftness  = 0.4f; // blocks over which it blends to full white
 
     private readonly GpuMesh _solid = new();
     private readonly WaterMesh _water = new();
@@ -278,14 +280,21 @@ public class Chunk
             _vb.SetData(_verts, 0, _verts.Length, SetDataOptions.Discard);
             _lastUpdateTime = float.NegativeInfinity;
         }
+        // chunks whose center is farther than this have no wave geometry, only foam
+        private const float FarUpdateDist = FadeEndDist + 15f;
+        private const float FarUpdateDistSq = FarUpdateDist * FarUpdateDist;
 
         public void Update(Vector3 cam, float time, Vector3 chunkCenter)
         {
             if (_vb == null) return;
 
-            // Throttle updates to ~30 FPS
-            if (time - _lastUpdateTime < 0.033f) return;
+            // Far chunks don't move, only their foam colors shift, so update them less often.
+            bool far = Vector3.DistanceSquared(cam, chunkCenter) > FarUpdateDistSq;
+            if (time - _lastUpdateTime < (far ? 0.1f : 0.033f)) return;
             _lastUpdateTime = time;
+
+            // Far chunks share a quantized clock so neighbors agree across chunk borders.
+            float noiseTime = far ? MathF.Floor(time / 0.1f) * 0.1f : time;
 
             float intensity = WaterWaveIntensity;
             bool animateWaves = intensity > 0.0001f;
@@ -293,58 +302,53 @@ public class Chunk
             for (int i = 0; i < _verts.Length; i++)
             {
                 Vector3 basePos = _baseVerts[i].Position;
+                Vector3 pos = basePos;
+                float foam = 0f;
 
                 // The mesher assigns matching wave weights to top-surface vertices and
                 // their upper side-edge copies. Lower side edges and bottoms have weight 0.
                 float waveWeight = _shoreWeights[i];
 
-                if (animateWaves && waveWeight > 0f)
+                // Far away only top faces need foam, which keeps the noise cost down.
+                if (animateWaves && waveWeight > 0f && (!far || _face[i] == 2))
                 {
-                    float distToCamSq = Vector3.DistanceSquared(cam, basePos);
+                    float noise = (float)WaterNoise.Noise(
+                        basePos.X * 0.35,
+                        basePos.Z * 0.35,
+                        noiseTime * WaterWaveSpeed);
 
+                    // Full-strength wave height at this point, regardless of distance.
+                    // Weight 2 = under an occluding block: it may only move down.
+                    float rise = noise * intensity * (waveWeight > 1f ? 1f : waveWeight);
+                    if (waveWeight > 1f) rise = MathF.Min(0f, rise);
+
+                    // Foam comes from the unfaded height, so it looks the same at any distance.
+                    if (rise > WaterFoamThreshold)
+                    {
+                        float ft = MathHelper.Clamp(
+                            (rise - WaterFoamThreshold) / MathF.Max(WaterFoamSoftness, 0.0001f),
+                            0f, 1f);
+                        foam = ft * ft * (3f - 2f * ft);   // smoothstep
+                    }
+
+                    // Only the vertex movement fades with distance.
+                    float distToCamSq = Vector3.DistanceSquared(cam, basePos);
                     if (distToCamSq < FadeEndDistSq)
                     {
-                        float noise = (float)WaterNoise.Noise(
-                            basePos.X * 0.35,
-                            basePos.Z * 0.35,
-                            time * WaterWaveSpeed);
-
-                        // Smoothstep distance fade avoids a visible slope change at fade limits.
                         float fadeFactor = 1f;
-
                         if (distToCamSq > FadeStartDistSq)
                         {
                             float dist = MathF.Sqrt(distToCamSq);
                             float t = MathHelper.Clamp(
-                                (dist - FadeStartDist) / (FadeEndDist - FadeStartDist),
-                                0f,
-                                1f);
-
+                                (dist - FadeStartDist) / (FadeEndDist - FadeStartDist), 0f, 1f);
                             fadeFactor = 1f - t * t * (3f - 2f * t);
                         }
 
-                        // Weight 2 marks a surface beneath an occluding block: it may
-                        // move downward, but must never rise through the block's underside.
-                        float displacement = noise * intensity * fadeFactor *
-                            (waveWeight > 1f ? 1f : waveWeight);
-
-                        if (waveWeight > 1f)
-                            displacement = MathF.Min(0f, displacement);
-
-                        _verts[i].Position = new Vector3(
-                            basePos.X,
-                            basePos.Y + displacement,
-                            basePos.Z);
-                    }
-                    else
-                    {
-                        _verts[i].Position = basePos;
+                        pos = new Vector3(basePos.X, basePos.Y + rise * fadeFactor, basePos.Z);
                     }
                 }
-                else
-                {
-                    _verts[i].Position = basePos;
-                }
+
+                _verts[i].Position = pos;
 
                 // Robust Fresnel alpha calculation
                 Vector3 d = cam - _verts[i].Position;
@@ -363,11 +367,20 @@ public class Chunk
                 if (a > AlphaMax) a = AlphaMax;
 
                 Color c = _base[i];
-                _verts[i].Color = new Color(
-                    c.R / 255f * a,
-                    c.G / 255f * a,
-                    c.B / 255f * a,
-                    a);
+                float rr = c.R / 255f, gg = c.G / 255f, bb = c.B / 255f;
+
+                if (foam > 0f)
+                {
+                    // Keep the baked light level but drop the water tint, so caps stay lit
+                    // (dark at night) instead of glowing. Foam is also more opaque than open water.
+                    float lit = MathF.Max(rr, MathF.Max(gg, bb));
+                    rr += (lit - rr) * foam;
+                    gg += (lit - gg) * foam;
+                    bb += (lit - bb) * foam;
+                    a  += (AlphaMax - a) * foam;
+                }
+
+                _verts[i].Color = new Color(rr * a, gg * a, bb * a, a);
             }
 
             _vb.SetData(_verts, 0, _verts.Length, SetDataOptions.Discard);

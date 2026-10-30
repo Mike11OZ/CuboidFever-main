@@ -67,22 +67,29 @@ public class Column
             top[x, z] = y;
         }
 
-        // Only cells beside a taller neighboring column can spread light sideways
+        // Seed every lit cell that can still brighten a horizontal neighbor.
+        // (The vertical pass alone leaves e.g. 11 sitting next to 13 under tree canopies.)
         var q = new Queue<(int x, int y, int z)>();
         for (int x = 0; x < Size; x++)
         for (int z = 0; z < Size; z++)
+        for (int y = 0; y < World.Height; y++)
         {
-            int nm = -1;
-            if (x > 0) nm = System.Math.Max(nm, top[x - 1, z]);
-            if (x < Size - 1) nm = System.Math.Max(nm, top[x + 1, z]);
-            if (z > 0) nm = System.Math.Max(nm, top[x, z - 1]);
-            if (z < Size - 1) nm = System.Math.Max(nm, top[x, z + 1]);
+            int l = sky[LIdx(x, y, z)];
+            if (l <= 1) continue;
 
-            for (int y = top[x, z] + 1; y <= System.Math.Min(nm, World.Height - 1); y++)
-                q.Enqueue((x, y, z));
+            for (int i = 0; i < 6; i++)
+            {
+                if (i == 2 || i == 3) continue; // horizontal only
+                int nx = x + N[i, 0], nz = z + N[i, 2];
+                if (nx < 0 || nz < 0 || nx >= Size || nz >= Size) continue;
+                if (!IsTransparent(nx, y, nz)) continue;
+
+                var info = BlockRegistry.Instance.Info[GetBlock(nx, y, nz)];
+                int extra = info.IsAir ? 0 : info.LightAttenuation;
+                if (sky[LIdx(nx, y, nz)] < l - 1 - extra) { q.Enqueue((x, y, z)); break; }
+            }
         }
-
-        while (q.Count > 0)
+                while (q.Count > 0)
         {
             var (x, y, z) = q.Dequeue();
             int l = sky[LIdx(x, y, z)];
