@@ -15,6 +15,11 @@ public class Chunk
     public int AppliedVersion = -1;   // version of the mesh currently on the GPU
     public bool Unloaded;
 
+    // ---- Water Wave Configuration ----
+    public static float WaterWaveIntensity = 0.05f; // Easily alterable at runtime
+    public static float WaterWaveSpeed = 0.8f;      // New: controls how fast the waves animate (try 0.5f to 1.0f)
+    private static readonly PerlinNoise WaterNoise = new(new Random(1337));
+
     private readonly GpuMesh _solid = new();
     private readonly WaterMesh _water = new();
 
@@ -153,7 +158,7 @@ public class Chunk
 
     public void DrawSolid(GraphicsDevice device) => _solid.Draw(device);
     public void DrawWater(GraphicsDevice device) => _water.Draw(device);
-    public void UpdateWater(Vector3 cam) => _water.Update(cam);
+    public void UpdateWater(Vector3 cam, float time) => _water.Update(cam, time);
     private class GpuMesh
     {
         private VertexBuffer _vb;
@@ -190,21 +195,19 @@ public class Chunk
             device.DrawIndexedPrimitives(PrimitiveType.TriangleList, 0, 0, _tris);
         }
     }
-    // Water mesh whose vertex alpha is recomputed from the viewing angle (Fresnel-style)
+    // Water mesh whose vertex alpha and wave height are dynamically updated
     private class WaterMesh
     {
-        private const float AlphaMin = 0.45f;        // looking straight down: mostly see-through
-        private const float AlphaMax = 0.95f;        // grazing angles: nearly opaque
-        private const float MoveThresholdSq = 0.25f; // skip updates until the camera moves 0.5 blocks
+        private const float AlphaMin = 0.45f;        
+        private const float AlphaMax = 0.95f;        
 
         private DynamicVertexBuffer _vb;
         private IndexBuffer _ib;
         private VertexPositionColorTexture[] _verts;
-        private Color[] _base;   // lit color per vertex, before alpha
-        private byte[] _face;    // 0/1 = X faces, 2/3 = Y faces, 4/5 = Z faces
+        private VertexPositionColorTexture[] _baseVerts; // Store unperturbed base vertices
+        private Color[] _base;   
+        private byte[] _face;    
         private int _tris;
-        private Vector3 _lastCam;
-        private bool _dirty;
 
         public bool HasData => _vb != null;
 
@@ -213,7 +216,7 @@ public class Chunk
             _vb?.Dispose();
             _ib?.Dispose();
             _vb = null; _ib = null;
-            _verts = null; _base = null; _face = null;
+            _verts = null; _baseVerts = null; _base = null; _face = null;
             _tris = 0;
         }
 
@@ -224,6 +227,11 @@ public class Chunk
 
             _verts = v;
             _face = faces;
+            
+            // Save a backup of the original vertex positions and attributes
+            _baseVerts = new VertexPositionColorTexture[v.Length];
+            Array.Copy(v, _baseVerts, v.Length);
+
             _base = new Color[v.Length];
             for (int i = 0; i < v.Length; i++) _base[i] = v[i].Color;
 
@@ -231,29 +239,42 @@ public class Chunk
             _vb = new DynamicVertexBuffer(device, typeof(VertexPositionColorTexture), v.Length, BufferUsage.WriteOnly);
             _ib = new IndexBuffer(device, IndexElementSize.ThirtyTwoBits, idx.Length, BufferUsage.WriteOnly);
             _ib.SetData(idx);
-            _dirty = true; // first Update fills the vertex buffer
         }
 
-        public void Update(Vector3 cam)
+        public void Update(Vector3 cam, float time)
         {
             if (_vb == null) return;
-            if (!_dirty && Vector3.DistanceSquared(cam, _lastCam) < MoveThresholdSq) return;
-            _lastCam = cam;
-            _dirty = false;
+
+            float intensity = WaterWaveIntensity;
+            bool animateWaves = intensity > 0.0001f;
 
             for (int i = 0; i < _verts.Length; i++)
             {
+                // 1. Apply Perlin noise wave displacement ONLY to top water faces (face index 2 = +Y)
+                if (animateWaves && _face[i] == 2)
+                {
+                    Vector3 basePos = _baseVerts[i].Position;
+                    // Sample noise using world XZ coordinates and time for smooth movement
+                    float noise = (float)WaterNoise.Noise(basePos.X * 0.35, basePos.Z * 0.35, time * WaterWaveSpeed);
+                    _verts[i].Position.Y = basePos.Y + noise * intensity;
+                }
+                else
+                {
+                    _verts[i].Position = _baseVerts[i].Position;
+                }
+
+                // 2. Existing Fresnel-style alpha calculation
                 Vector3 d = cam - _verts[i].Position;
                 float dist = d.Length();
-                float along = _face[i] < 2 ? d.X : _face[i] < 4 ? d.Y : d.Z; // distance along the face normal
+                float along = _face[i] < 2 ? d.X : _face[i] < 4 ? d.Y : d.Z; 
                 float cos = dist > 0.001f ? MathF.Abs(along) / dist : 1f;
 
                 float k = 1f - cos;
-                k *= k; k *= k;                                // (1 - cos)^4
+                k *= k; k *= k;                                
                 float a = AlphaMin + (AlphaMax - AlphaMin) * k;
 
                 Color c = _base[i];
-                _verts[i].Color = new Color(c.R / 255f * a, c.G / 255f * a, c.B / 255f * a, a); // premultiplied
+                _verts[i].Color = new Color(c.R / 255f * a, c.G / 255f * a, c.B / 255f * a, a); 
             }
             _vb.SetData(_verts, 0, _verts.Length, SetDataOptions.Discard);
         }

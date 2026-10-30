@@ -153,6 +153,9 @@ public class Game1 : Game
 
     protected override void Update(GameTime gameTime)
     {
+        float totalTime = (float)gameTime.TotalGameTime.TotalSeconds;
+        float dt = (float)gameTime.ElapsedGameTime.TotalSeconds;
+
         var kb = Keyboard.GetState();
         var mouse = Mouse.GetState();
         if (kb.IsKeyDown(Keys.Escape)) Exit();
@@ -160,7 +163,7 @@ public class Game1 : Game
         if (!_spawned)
         {
             _forward = Vector3.Forward;
-            _world.Update(GraphicsDevice, _camPos);
+            _world.Update(GraphicsDevice, _camPos, totalTime);
             TrySpawn();
             _effect.View = Matrix.CreateLookAt(_camPos, _camPos + _forward, Vector3.Up);
             _solidEffect.View = _effect.View;
@@ -171,13 +174,13 @@ public class Game1 : Game
         HandleFpsHotkey(kb);
         HandleLeafHotkey(kb);
         HandleAoHotkey(kb);
-        UpdateCamera(kb, (float)gameTime.ElapsedGameTime.TotalSeconds);
+        UpdateCamera(kb, dt);
         HandleBlockSelection(kb, mouse);
         HandleBlockInteraction(mouse);
-        _particleSystem.Update((float)gameTime.ElapsedGameTime.TotalSeconds, _world);
+        _particleSystem.Update(dt, _world);
         _prevMouse = mouse;
 
-        _world.Update(GraphicsDevice, _camPos);
+        _world.Update(GraphicsDevice, _camPos, totalTime);
         _effect.View = Matrix.CreateLookAt(_camPos, _camPos + _forward, Vector3.Up);
         _solidEffect.View = _effect.View;
         base.Update(gameTime);
@@ -286,8 +289,9 @@ public class Game1 : Game
 
     protected override void Draw(GameTime gameTime)
     {
+        float totalTime = (float)gameTime.TotalGameTime.TotalSeconds;
         var frustum = new BoundingFrustum(_effect.View * _effect.Projection);
-        _world.UpdateVisibility(frustum, _camPos);
+        _world.UpdateVisibility(frustum, _camPos, totalTime);
         GraphicsDevice.Clear(Color.CornflowerBlue);
         GraphicsDevice.SamplerStates[0] = SamplerState.PointClamp;
 

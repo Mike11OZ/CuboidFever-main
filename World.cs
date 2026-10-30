@@ -99,7 +99,7 @@ public class World
     // =====================  PER-FRAME UPDATE  =====================
 
     // Call once per frame, after any block edits
-    public void Update(GraphicsDevice device, Vector3 camPos)
+    public void Update(GraphicsDevice device, Vector3 camPos, float time)
     {
         int ccx = (int)MathF.Floor(camPos.X / 16f);
         int ccz = (int)MathF.Floor(camPos.Z / 16f);
@@ -385,7 +385,7 @@ public class World
 
     // =====================  DRAWING  =====================
 
-    public void UpdateVisibility(BoundingFrustum frustum, Vector3 camPos)
+    public void UpdateVisibility(BoundingFrustum frustum, Vector3 camPos, float time)
     {
         _visible.Clear();
         float maxDist = (LoadRadius + 1) * Chunk.Size;
@@ -403,7 +403,7 @@ public class World
 
             if (frustum.Intersects(chunk.Bounds)) _visible.Add(chunk);
         }
-        foreach (var chunk in _visible) chunk.UpdateWater(camPos);
+        foreach (var chunk in _visible) chunk.UpdateWater(camPos, time);
     }
 
     public void DrawSolid(GraphicsDevice device)
