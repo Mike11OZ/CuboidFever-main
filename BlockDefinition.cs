@@ -12,6 +12,7 @@ public class BlockDefinition
     public bool Solid { get; set; } = true;
     public bool Transparent { get; set; }
     public bool Replaceable { get; set; }
+    public int LightAttenuation { get; set; } = 0;
     public bool Emissive { get; set; }
 
     // Whether this block occupies an entire voxel.

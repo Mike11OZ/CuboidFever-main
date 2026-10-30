@@ -5,6 +5,7 @@
   "fullBlock": true,
   "replaceable": true,
   "emissive": false,
+  "lightAttenuation": 1,
   "emission": {
     "r": 0,
     "g": 0,

@@ -73,18 +73,36 @@ public class LightMap
     // Spreads light outward from every cell in the queue
     private void Propagate(int ch, Queue<(int x, int y, int z)> q)
     {
+        var registry = BlockRegistry.Instance;
+
         while (q.Count > 0)
         {
             var (x, y, z) = q.Dequeue();
             int l = Get(ch, x, y, z);
-            if (l <= 1) continue;
+            if (l <= 0) continue;
 
             for (int i = 0; i < 6; i++)
             {
-                int nx = x + N[i, 0], ny = y + N[i, 1], nz = z + N[i, 2];
-                if (!Loaded(nx, ny, nz) || !Transparent(nx, ny, nz)) continue;
+                int nx = x + N[i, 0];
+                int ny = y + N[i, 1];
+                int nz = z + N[i, 2];
 
-                int nl = (ch == 0 && i == 3 && l == 15) ? 15 : l - 1;
+                if (!Loaded(nx, ny, nz))
+                    continue;
+
+                byte blockId = _world.GetBlock(nx, ny, nz);
+                var info = BlockRegistry.Instance.Info[blockId];
+
+                if (!info.Transparent)
+                    continue;
+                    
+                int baseCost = 1;
+                int extraCost = info.IsAir ? 0 : info.LightAttenuation;
+
+                int nl = l - baseCost - extraCost;
+                if (nl <= 0)
+                    continue;
+
                 if (Get(ch, nx, ny, nz) < nl)
                 {
                     Set(ch, nx, ny, nz, nl);
@@ -112,19 +130,56 @@ public class LightMap
             {
                 int nx = cx + N[i, 0], ny = cy + N[i, 1], nz = cz + N[i, 2];
                 if (!Loaded(nx, ny, nz)) continue;
-                int nl = Get(ch, nx, ny, nz);
-                if (nl == 0) continue;
+                int neighborLevel = Get(ch, nx, ny, nz);
+                if (neighborLevel == 0) continue;
 
-                bool dependent = nl < l || (ch == 0 && i == 3 && l == 15 && nl == 15);
-                if (dependent)
+                byte neighborId = _world.GetBlock(nx, ny, nz);
+                var neighborInfo = BlockRegistry.Instance.Info[neighborId];
+
+                // Opaque blocks cannot receive propagated light.
+                // Preserve any light emitted by the block itself.
+                if (!neighborInfo.Transparent)
+                {
+                    int em = Emit(ch, neighborId);
+
+                    if (em > 0)
+                        add.Enqueue((nx, ny, nz));
+
+                    continue;
+                }
+
+                // Calculate the maximum light this cell could have contributed
+                // to the neighbor using the same rules as Propagate().
+                int baseCost = 1;
+
+                int extraCost =
+                    neighborInfo.IsAir
+                        ? 0
+                        : neighborInfo.LightAttenuation;
+
+                int expectedLevel = l - baseCost - extraCost;
+
+                // If the neighbor's current light could have depended on this cell,
+                // clear it so that it can be rebuilt from the remaining light sources.
+                if (neighborLevel <= expectedLevel)
                 {
                     Set(ch, nx, ny, nz, 0);
-                    rem.Enqueue((nx, ny, nz, nl));
+                    rem.Enqueue((nx, ny, nz, neighborLevel));
 
-                    int em = Emit(ch, _world.GetBlock(nx, ny, nz));
-                    if (em > 0) { Set(ch, nx, ny, nz, em); add.Enqueue((nx, ny, nz)); }
+                    int em = Emit(ch, neighborId);
+
+                    if (em > 0)
+                    {
+                        Set(ch, nx, ny, nz, em);
+                        add.Enqueue((nx, ny, nz));
+                    }
                 }
-                else add.Enqueue((nx, ny, nz));
+                else
+                {
+                    // This neighbor is brighter than this cell could make it.
+                    // Preserve it and allow it to propagate again.
+                    add.Enqueue((nx, ny, nz));
+                }
             }
         }
     }
@@ -142,7 +197,7 @@ public class LightMap
 
             if (clear)
             {
-                if (ch == 0 && Get(0, x, y + 1, z) == 15)
+                if (ch == 0 && Get(0, x, y + 1, z) == 15 && BlockRegistry.Instance.Info[id].IsAir)
                 {
                     Set(0, x, y, z, 15);
                     q.Enqueue((x, y, z));
@@ -190,13 +245,29 @@ public class LightMap
                     int va = la[Column.LIdx(ax, y, az)];
                     int vb = lb[Column.LIdx(bx, y, bz)];
 
-                    if (va - 1 > vb)
+                    int worldAX = col.CX * 16 + ax;
+                    int worldAZ = col.CZ * 16 + az;
+                    int worldBX = nb.CX * 16 + bx;
+                    int worldBZ = nb.CZ * 16 + bz;
+
+                    int attenuationB = BlockRegistry.Instance
+                        .Info[_world.GetBlock(worldBX, y, worldBZ)]
+                        .LightAttenuation;
+
+                    int attenuationA = BlockRegistry.Instance
+                        .Info[_world.GetBlock(worldAX, y, worldAZ)]
+                        .LightAttenuation;
+
+                    if (nb.IsTransparent(bx, y, bz) &&
+                        va - attenuationB > vb)
                     {
-                        if (nb.IsTransparent(bx, y, bz)) q.Enqueue((col.CX * 16 + ax, y, col.CZ * 16 + az));
+                        q.Enqueue((worldAX, y, worldAZ));
                     }
-                    else if (vb - 1 > va)
+
+                    if (col.IsTransparent(ax, y, az) &&
+                        vb - attenuationA > va)
                     {
-                        if (col.IsTransparent(ax, y, az)) q.Enqueue((nb.CX * 16 + bx, y, nb.CZ * 16 + bz));
+                        q.Enqueue((worldBX, y, worldBZ));
                     }
                 }
                 Propagate(ch, q);

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace CuboidFever;
@@ -43,9 +44,27 @@ public class Column
         for (int z = 0; z < Size; z++)
         {
             int y = World.Height - 1;
-            while (y >= 0 && IsTransparent(x, y, z)) y--;
+            int light = 15;
+
+            while (y >= 0)
+            {
+                byte blockId = GetBlock(x, y, z);
+                var info = BlockRegistry.Instance.Info[blockId];
+
+                if (!info.Transparent)
+                    break;
+
+                sky[LIdx(x, y, z)] = (byte)light;
+
+                // Air and clear glass preserve full-strength direct skylight.
+                // Other transparent blocks apply their additional attenuation.
+                if (!info.IsAir)
+                    light = Math.Max(0, light - info.LightAttenuation);
+
+                y--;
+            }
+
             top[x, z] = y;
-            for (int sy = World.Height - 1; sy > y; sy--) sky[LIdx(x, sy, z)] = 15;
         }
 
         // Only cells beside a taller neighboring column can spread light sideways
@@ -67,17 +86,35 @@ public class Column
         {
             var (x, y, z) = q.Dequeue();
             int l = sky[LIdx(x, y, z)];
-            if (l <= 1) continue;
+            if (l <= 0) continue;
 
             for (int i = 0; i < 6; i++)
             {
                 int nx = x + N[i, 0], ny = y + N[i, 1], nz = z + N[i, 2];
                 if (nx < 0 || nz < 0 || nx >= Size || nz >= Size || ny < 0 || ny >= World.Height) continue;
-                if (!IsTransparent(nx, ny, nz)) continue;
+                if (!IsTransparent(nx, ny, nz))
+                    continue;
 
-                int nl = (i == 3 && l == 15) ? 15 : l - 1; // full sky light falls straight down
+                byte blockId = GetBlock(nx, ny, nz);
+                var info = BlockRegistry.Instance.Info[blockId];
+
+                // Normal propagation costs one level.
+                // Block attenuation adds an additional cost.
+                // Direct skylight at level 15 is preserved through air and clear glass.
+                int baseCost = i == 3 && l == 15 ? 0 : 1;
+                int extraCost = info.IsAir ? 0 : info.LightAttenuation;
+
+                int nl = l - baseCost - extraCost;
+                if (nl <= 0)
+                    continue;
+
                 int ni = LIdx(nx, ny, nz);
-                if (sky[ni] < nl) { sky[ni] = (byte)nl; q.Enqueue((nx, ny, nz)); }
+
+                if (sky[ni] < nl)
+                {
+                    sky[ni] = (byte)nl;
+                    q.Enqueue((nx, ny, nz));
+                }
             }
         }
     }

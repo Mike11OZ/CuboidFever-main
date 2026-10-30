@@ -10,6 +10,7 @@ namespace CuboidFever;
 public struct BlockInfo
 {
     public bool Transparent, Solid, FullBlock, Emissive, Occludes;
+    public int LightAttenuation;
     public bool IsAir, IsWater, IsGlass, IsLeaves;
     public float TintR, TintG, TintB;   // 0-1, used by emissive blocks
     
@@ -43,6 +44,7 @@ public sealed class BlockRegistry
                 Transparent = def.Transparent,
                 Solid = def.Solid,
                 FullBlock = def.FullBlock,
+                LightAttenuation = def.LightAttenuation,
                 Emissive = def.Emissive,
                 Occludes = def.Solid && !def.Transparent,
                 IsAir = name.Equals("cuboidfever:air", StringComparison.OrdinalIgnoreCase),
@@ -158,6 +160,13 @@ public sealed class BlockRegistry
         for (int i = 0; i < definitions.Count; i++)
         {
             var definition = definitions[i];
+
+            if (definition.LightAttenuation < 0 || definition.LightAttenuation > 15)
+            {
+                throw new InvalidDataException(
+                    $"Block '{definition.Name}' has invalid lightAttenuation " +
+                    $"{definition.LightAttenuation}. Expected a value from 0 to 15.");
+            }
 
             if (string.IsNullOrWhiteSpace(definition.Name))
                 throw new InvalidDataException("A block has no name.");
