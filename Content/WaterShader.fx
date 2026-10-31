@@ -168,23 +168,30 @@ float ShoreBit(float mask, float div)
 // 'local' is the position inside the cell (0..1). Distance is measured with max(dx, dz) (the
 // "square" metric), so the foam is square around corners instead of round. Foam is full up to
 // (width - softness) from the shore and fades to nothing at 'width'.
-float ShoreFoam(float mask, float2 local, float width, float softness)
+float ShoreFoam(float mask, float2 local, float width, float softness, out float diagOnly)
 {
     float lx = local.x;
     float lz = local.y;
 
-    float d = 10.0;
-    d = min(d, lerp(10.0, 1.0 - lx, ShoreBit(mask,   1.0)));                    // solid on +x
-    d = min(d, lerp(10.0, lx,       ShoreBit(mask,   2.0)));                    // solid on -x
-    d = min(d, lerp(10.0, 1.0 - lz, ShoreBit(mask,   4.0)));                    // solid on +z
-    d = min(d, lerp(10.0, lz,       ShoreBit(mask,   8.0)));                    // solid on -z
-    d = min(d, lerp(10.0, max(1.0 - lx, 1.0 - lz), ShoreBit(mask,  16.0)));     // solid on +x+z corner
-    d = min(d, lerp(10.0, max(1.0 - lx, lz),       ShoreBit(mask,  32.0)));     // +x-z
-    d = min(d, lerp(10.0, max(lx, 1.0 - lz),       ShoreBit(mask,  64.0)));     // -x+z
-    d = min(d, lerp(10.0, max(lx, lz),             ShoreBit(mask, 128.0)));     // -x-z
+    float dC = 10.0;   // distance to nearest solid edge neighbor
+    dC = min(dC, lerp(10.0, 1.0 - lx, ShoreBit(mask,   1.0)));
+    dC = min(dC, lerp(10.0, lx,       ShoreBit(mask,   2.0)));
+    dC = min(dC, lerp(10.0, 1.0 - lz, ShoreBit(mask,   4.0)));
+    dC = min(dC, lerp(10.0, lz,       ShoreBit(mask,   8.0)));
 
-    float t = saturate((width - d) / max(softness, 0.0001));
-    return t * t * (3.0 - 2.0 * t);   // smoothstep
+    float dD = 10.0;   // distance to nearest solid corner neighbor
+    dD = min(dD, lerp(10.0, max(1.0 - lx, 1.0 - lz), ShoreBit(mask,  16.0)));
+    dD = min(dD, lerp(10.0, max(1.0 - lx, lz),       ShoreBit(mask,  32.0)));
+    dD = min(dD, lerp(10.0, max(lx, 1.0 - lz),       ShoreBit(mask,  64.0)));
+    dD = min(dD, lerp(10.0, max(lx, lz),             ShoreBit(mask, 128.0)));
+
+    float tC = saturate((width - dC) / max(softness, 0.0001));
+    float tD = saturate((width - dD) / max(softness, 0.0001));
+    tC = tC * tC * (3.0 - 2.0 * tC);
+    tD = tD * tD * (3.0 - 2.0 * tD);
+
+    diagOnly = saturate(tD - tC);   // foam that exists only because of a corner neighbor
+    return max(tC, tD);             // same result as before
 }
 
 float4 WaterPS(VertexShaderOutput input) : COLOR0
@@ -215,6 +222,7 @@ float4 WaterPS(VertexShaderOutput input) : COLOR0
     }
 
     // 2. Shoreline foam: squared bands along solid edges, squares in solid corners
+    float diagOnly = 0.0;
     float shoreFoam = 0.0;
     if (isCovered < 0.5 && input.Shore > 0.5)
     {
@@ -222,7 +230,7 @@ float4 WaterPS(VertexShaderOutput input) : COLOR0
         float foamWidth = ShoreFoamWidth * lerp(1.0 - ShoreFoamRagged, 1.0 + ShoreFoamRagged, shoreNoise);
 
         float mask = floor(input.Shore + 0.5) - 1.0;   // round: the value is interpolated across the quad
-        shoreFoam = ShoreFoam(mask, frac(input.Data.xy), foamWidth, ShoreFoamSoftness);
+        shoreFoam = ShoreFoam(mask, frac(input.Data.xy), foamWidth, ShoreFoamSoftness, diagOnly);
     }
 
     foam = max(foam, shoreFoam);
@@ -234,7 +242,8 @@ float4 WaterPS(VertexShaderOutput input) : COLOR0
 
     float3 finalRgb = lerp(waterRgb, foamRgb, foam);
     float finalAlpha = lerp(waterAlpha, 1.0, foam);
-
+    
+    finalRgb = lerp(finalRgb, float3(0, 0, 1), diagOnly);   // DEBUG, remove after
     return float4(finalRgb, finalAlpha);
 }
 
