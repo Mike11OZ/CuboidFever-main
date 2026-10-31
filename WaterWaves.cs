@@ -21,6 +21,9 @@ public static class WaterWaves
     public static float FoamBreakup   = 0.50f; // 0 = smooth blobs, 1 = very ragged
     public static float FoamNoiseScale = 1.4f; // noise cells per block
     public static float FoamWhiteness = 0.40f; // how much the water texture is washed out under foam
+    public static float ShoreFoamWidth    = 0.40f; // blocks from the shore where foam ends completely
+    public static float ShoreFoamSoftness = 0.28f; // blocks of fade at the outer edge (0 = hard edge)
+    public static float ShoreFoamRagged   = 0.30f;
 
     // ---- Wave table ----
     public const int Count = 4;
@@ -113,5 +116,8 @@ public static class WaterWaves
         fx.Parameters["FoamBreakup"]?.SetValue(FoamBreakup);
         fx.Parameters["FoamNoiseScale"]?.SetValue(FoamNoiseScale);
         fx.Parameters["FoamWhiteness"]?.SetValue(FoamWhiteness);
+        fx.Parameters["ShoreFoamWidth"]?.SetValue(ShoreFoamWidth);
+        fx.Parameters["ShoreFoamSoftness"]?.SetValue(ShoreFoamSoftness);
+        fx.Parameters["ShoreFoamRagged"]?.SetValue(ShoreFoamRagged);
     }
 }

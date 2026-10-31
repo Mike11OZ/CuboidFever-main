@@ -26,6 +26,9 @@ float FoamCrestSoft;
 float FoamBreakup;
 float FoamNoiseScale;
 float FoamWhiteness;
+float ShoreFoamWidth;     // blocks from the shore where foam ends completely
+float ShoreFoamSoftness;  // blocks of fade at the outer edge (0 = hard edge)
+float ShoreFoamRagged;    // 0..1, how much noise varies the width
 
 static const float AlphaMin = 0.60;
 static const float AlphaMax = 0.90;
@@ -50,6 +53,7 @@ struct VertexShaderOutput
     float4 Color    : COLOR0;
     float2 Uv       : TEXCOORD0;
     float4 Data     : TEXCOORD1;   // xy = world xz, z = weight, w = covered flag
+    float  Shore    : TEXCOORD2;   // 0 = no shore foam, else 1 + 8-bit mask of solid neighbors (top faces only)
 };
 
 float3 WaveSample(float2 xz)
@@ -91,7 +95,11 @@ VertexShaderOutput WaterVS(VertexShaderInput input)
 {
     VertexShaderOutput output;
 
-    float wType = input.Water;
+    // The mesher packs two things into this one float: wave weight (0, 1 or 2) in the low part and,
+    // for top faces, (1 + shoreline neighbor mask) * 4 above it.
+    float packedWater = input.Water;
+    float shoreCode = floor(packedWater * 0.25);
+    float wType = packedWater - 4.0 * shoreCode;
 
     float4 pos = float4(input.Position, 1.0);
     float rise = WaveSample(pos.xz).x;
@@ -121,6 +129,7 @@ VertexShaderOutput WaterVS(VertexShaderInput input)
 
     output.Color = float4(input.Color.rgb, alpha);
     output.Data = float4(input.Position.x, input.Position.z, wType, wType > 1.5 ? 1.0 : 0.0);
+    output.Shore = shoreCode;
     return output;
 }
 
@@ -143,6 +152,39 @@ float ValueNoise(float2 p)
     float d = Hash21(i + float2(1, 1));
 
     return lerp(lerp(a, b, u.x), lerp(c, d, u.x), u.y);
+}
+
+// Bit of an 8-bit mask: div is 1, 2, 4, ... 128. Adding 0.5 before dividing keeps the result away from
+// exact integer boundaries, so tiny GPU division/interpolation errors can never flip a bit.
+float ShoreBit(float mask, float div)
+{
+    float k = floor((mask + 0.5) / div);
+    return step(0.5, frac(k * 0.5));   // 1 when k is odd
+}
+
+// Shoreline foam for one water cell, from the distance to the nearest solid block.
+// 'mask' bits mark which of the 8 neighboring cells are solid:
+//   0:+x  1:-x  2:+z  3:-z  4:+x+z  5:+x-z  6:-x+z  7:-x-z
+// 'local' is the position inside the cell (0..1). Distance is measured with max(dx, dz) (the
+// "square" metric), so the foam is square around corners instead of round. Foam is full up to
+// (width - softness) from the shore and fades to nothing at 'width'.
+float ShoreFoam(float mask, float2 local, float width, float softness)
+{
+    float lx = local.x;
+    float lz = local.y;
+
+    float d = 10.0;
+    d = min(d, lerp(10.0, 1.0 - lx, ShoreBit(mask,   1.0)));                    // solid on +x
+    d = min(d, lerp(10.0, lx,       ShoreBit(mask,   2.0)));                    // solid on -x
+    d = min(d, lerp(10.0, 1.0 - lz, ShoreBit(mask,   4.0)));                    // solid on +z
+    d = min(d, lerp(10.0, lz,       ShoreBit(mask,   8.0)));                    // solid on -z
+    d = min(d, lerp(10.0, max(1.0 - lx, 1.0 - lz), ShoreBit(mask,  16.0)));     // solid on +x+z corner
+    d = min(d, lerp(10.0, max(1.0 - lx, lz),       ShoreBit(mask,  32.0)));     // +x-z
+    d = min(d, lerp(10.0, max(lx, 1.0 - lz),       ShoreBit(mask,  64.0)));     // -x+z
+    d = min(d, lerp(10.0, max(lx, lz),             ShoreBit(mask, 128.0)));     // -x-z
+
+    float t = saturate((width - d) / max(softness, 0.0001));
+    return t * t * (3.0 - 2.0 * t);   // smoothstep
 }
 
 float4 WaterPS(VertexShaderOutput input) : COLOR0
@@ -172,13 +214,15 @@ float4 WaterPS(VertexShaderOutput input) : COLOR0
         foam = steep * crest * allowed;
     }
 
-    // 2. Shoreline foam border effect
+    // 2. Shoreline foam: squared bands along solid edges, squares in solid corners
     float shoreFoam = 0.0;
-    if (weight < 0.5 && isCovered < 0.5)
+    if (isCovered < 0.5 && input.Shore > 0.5)
     {
-        float edgeDist = 1.0 - weight;
         float shoreNoise = ValueNoise(input.Data.xy * (FoamNoiseScale * 1.5) + float2(WaveTime * 0.2, WaveTime * 0.15));
-        shoreFoam = smoothstep(0.35, 0.75, edgeDist) * lerp(0.6, 1.0, shoreNoise);
+        float foamWidth = ShoreFoamWidth * lerp(1.0 - ShoreFoamRagged, 1.0 + ShoreFoamRagged, shoreNoise);
+
+        float mask = floor(input.Shore + 0.5) - 1.0;   // round: the value is interpolated across the quad
+        shoreFoam = ShoreFoam(mask, frac(input.Data.xy), foamWidth, ShoreFoamSoftness);
     }
 
     foam = max(foam, shoreFoam);

@@ -14,7 +14,7 @@ public class World
     public const int SeaLevel = 64;
 
     // How many columns around the player stay loaded. Meshes exist out to LoadRadius - 1.
-    public int LoadRadius = 10;
+    public int LoadRadius = 16;
     private int UnloadRadius => LoadRadius + 2; // hysteresis, so chunks don't thrash at the boundary
 
     // Only the main thread ever touches these collections

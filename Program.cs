@@ -7,33 +7,28 @@ public static class Program
     [STAThread]
     static void Main()
     {
-        // Optional: You can call AllocConsole() here in Program.cs 
-        // instead of inside Game1 so it opens before the game even loads.
-        
-        using var game = new CuboidFever.Game1();
-        
         try
         {
+            using var game = new CuboidFever.Game1();
             game.Run();
         }
         catch (Exception ex)
         {
-            // If the game crashes, print the exception to your console window
             Console.WriteLine($"\n[FATAL CRASH]:\n{ex}");
         }
         finally
         {
-            // This runs whether the game closed normally or crashed
-            Console.WriteLine("\n--- Game process has terminated. Press any key to close this window ---");
+            // Game window has closed. The terminal remains open.
+            Console.WriteLine("\n--- Game window closed. Terminal remains open. ---");
             
+            // If you want the terminal to stay open until you manually close it, 
+            // you can leave Console.ReadKey() here, or remove it if launched from an external shell.
             try 
             { 
                 Console.ReadKey(); 
             } 
             catch 
-            {
-                // Handles edge cases where standard input isn't attached
-            }
+            { }
         }
     }
 }

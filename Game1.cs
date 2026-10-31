@@ -178,7 +178,12 @@ public class Game1 : Game
 
         var kb = Keyboard.GetState();
         var mouse = Mouse.GetState();
-        if (kb.IsKeyDown(Keys.Escape)) Exit();
+        
+        // Inside your Update method in Game1.cs
+        if (Keyboard.GetState().IsKeyDown(Keys.Escape))
+        {
+            this.Exit(); // Gracefully stops game.Run() and returns control to Program.cs
+        }
 
         if (!_spawned)
         {
