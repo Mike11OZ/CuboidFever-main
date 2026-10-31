@@ -1,6 +1,7 @@
 ﻿using System;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
@@ -9,6 +10,10 @@ namespace CuboidFever;
 
 public class Game1 : Game
 {
+    // Import the Windows function that creates a console window
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool AllocConsole();
+
     // ---- Configuration ----
     private const float ReachDistance = 5f; // Easy to tweak here!
     
@@ -16,6 +21,7 @@ public class Game1 : Game
     private GraphicsDeviceManager _graphics;
     private BasicEffect _effect;
     private BasicEffect _lineEffect;
+    private Effect _waterEffect;
     private Texture2D _atlas;
     private ParticleSystem _particleSystem = new();
     private World _world;
@@ -53,10 +59,23 @@ public class Game1 : Game
 
     public Game1()
     {
+        // Spawns a background console window for this process
+        AllocConsole();
+        Console.SetOut(new StreamWriter(Console.OpenStandardOutput()) { AutoFlush = true });
+
+        // This bridges Debug.WriteLine over to the standard output stream
+        System.Diagnostics.Trace.Listeners.Add(new System.Diagnostics.ConsoleTraceListener());
+        
+
+        // Redirect standard output so Console.WriteLine works in the new window
+        Console.SetOut(new StreamWriter(Console.OpenStandardOutput()) { AutoFlush = true });
+
+        Console.WriteLine("Console window initialized! Debug output is live.");
+
         _graphics = new GraphicsDeviceManager(this);
         Content.RootDirectory = "Content";
         IsMouseVisible = false;
-        _graphics.SynchronizeWithVerticalRetrace = false; // vsync off, so the cap is what limits FPS
+        _graphics.SynchronizeWithVerticalRetrace = false;
         ApplyFpsCap();
     }
 
@@ -134,6 +153,7 @@ public class Game1 : Game
             ReferenceAlpha = 128,
             Projection = _effect.Projection
         };
+        _waterEffect = Content.Load<Effect>("WaterShader");
     }
 
     private void TrySpawn()
@@ -289,14 +309,14 @@ public class Game1 : Game
         GraphicsDevice.Clear(Color.CornflowerBlue);
         GraphicsDevice.SamplerStates[0] = SamplerState.PointClamp;
 
-        DrawWorld(frustum);
+        DrawWorld(frustum, totalTime);
         DrawHud();
         UpdateTitle(gameTime);
 
         base.Draw(gameTime);
     }
 
-    private void DrawWorld(BoundingFrustum frustum)
+    private void DrawWorld(BoundingFrustum frustum, float totalTime)
     {
         GraphicsDevice.BlendState = BlendState.Opaque;
         GraphicsDevice.DepthStencilState = DepthStencilState.Default;
@@ -315,9 +335,10 @@ public class Game1 : Game
         _particleSystem.Draw(GraphicsDevice, _effect, frustum, camRight, camUp);
 
         GraphicsDevice.BlendState = BlendState.AlphaBlend;
-        GraphicsDevice.DepthStencilState = DepthStencilState.DepthRead;
+        GraphicsDevice.DepthStencilState = DepthStencilState.DepthRead; // Disables depth writes so water layers don't clip each other
         GraphicsDevice.RasterizerState = RasterizerState.CullNone;
-        foreach (var pass in _effect.CurrentTechnique.Passes)
+        WaterWaves.Apply(_waterEffect, _effect.View * _effect.Projection, _camPos, _atlas, totalTime);
+        foreach (var pass in _waterEffect.CurrentTechnique.Passes)
         {
             pass.Apply();
             _world.DrawWater(GraphicsDevice);

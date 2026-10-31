@@ -356,20 +356,20 @@ public class World
         col.Modified = true;
 
         _urgentMode = true;
-        MarkDirty(chunk);
-
-        // A block on a chunk border changes which faces the neighbor needs
-        if (lx == 0)  MarkDirtyAt(x - 1, y, z);
-        if (lx == 15) MarkDirtyAt(x + 1, y, z);
-        if (ly == 0)  MarkDirtyAt(x, y - 1, z);
-        if (ly == 15) MarkDirtyAt(x, y + 1, z);
-        if (lz == 0)  MarkDirtyAt(x, y, z - 1);
-        if (lz == 15) MarkDirtyAt(x, y, z + 1);
+        
+        // Mark dirty all chunks in the 1-block neighborhood (including diagonals and vertical bounds)
+        // so that all adjacent water vertices and face weights update instantly.
+        for (int dz = -1; dz <= 1; dz++)
+        for (int dy = -1; dy <= 1; dy++)
+        for (int dx = -1; dx <= 1; dx++)
+        {
+            MarkDirtyAt(x + dx, y + dy, z + dz);
+        }
 
         Light.OnBlockChanged(x, y, z);
         _urgentMode = false;
     }
-
+    
     // A light change can alter faces in a neighboring chunk too
     public void MarkLightDirty(int x, int y, int z)
     {
@@ -403,7 +403,6 @@ public class World
 
             if (frustum.Intersects(chunk.Bounds)) _visible.Add(chunk);
         }
-        foreach (var chunk in _visible) chunk.UpdateWater(camPos, time);
     }
 
     public void DrawSolid(GraphicsDevice device)
