@@ -10,17 +10,17 @@ namespace CuboidFever;
 public static class WaterWaves
 {
     // ---- Runtime-tweakable settings ----
-    public static float Intensity = 0.25f;   // scales every wave (was Chunk.WaterWaveIntensity)
+    public static float Intensity = 0.30f;   // scales every wave (was Chunk.WaterWaveIntensity)
     public static float Speed     = 0.8f;   // animation speed     (was Chunk.WaterWaveSpeed)
 
     // ---- Whitecap tuning ----
     public static float FoamSlope     = 0.30f; // surface slope where foam starts (rises with Intensity)
-    public static float FoamSoftness  = 0.20f; // slope range over which it blends to full foam
+    public static float FoamSoftness  = 0.10f; // slope range over which it blends to full foam
     public static float FoamCrestMin  = 0.05f; // blocks above rest level before foam is allowed
     public static float FoamCrestSoft = 0.25f;
     public static float FoamBreakup   = 0.50f; // 0 = smooth blobs, 1 = very ragged
     public static float FoamNoiseScale = 1.4f; // noise cells per block
-    public static float FoamWhiteness = 0.40f; // how much the water texture is washed out under foam
+    public static float FoamWhiteness = 0.75f; // how much the water texture is washed out under foam
 
     // ---- Wave table ----
     public const int Count = 4;

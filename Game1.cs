@@ -142,7 +142,7 @@ public class Game1 : Game
                 .Replace('_', ' '))
             .ToArray();
 
-        _world = new World(8008135);
+        _world = new World(8374173);
         _camPos = new Vector3(128.5f, 100f, 128.5f); // looking-from point while the first columns load
 
         _solidEffect = new AlphaTestEffect(GraphicsDevice)

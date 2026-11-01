@@ -18,6 +18,15 @@ public class TerrainGenerator
     private const double BaseHeight = 0.40;
     private const double DepthInfluence = 2.0;
     private const double Roughness = 1.0;
+    // Keep at least 32 blocks of vertical building space above terrain.
+    private const int TerrainBuildHeightBuffer = 32;
+
+    // Begin reducing terrain elevations this far below the hard cap.
+    private const int HighAltitudeFadeDepth = 48;
+    // Continentalness configuration
+    private const int ContinentalNoiseOctaves = 4;
+    private const double ContinentalNoiseScale = 3000.0;
+    private const double ContinentalHeightInfluence = 0.5;
 
     private const double NoiseScale = 684.412;
     private const int GX = 5, GY = 17, GZ = 5;
@@ -51,7 +60,7 @@ public class TerrainGenerator
         _stoneDepth = new OctaveNoise(r, 4);
         _scale2D = new OctaveNoise(r, 10);
         _depth2D = new OctaveNoise(r, 16);
-        _continentalNoise = new OctaveNoise(r, 4);
+        _continentalNoise = new OctaveNoise(r, ContinentalNoiseOctaves);
     }
 
     public void GenerateColumn(int cx, int cz, byte[,,] col)
@@ -85,9 +94,9 @@ public class TerrainGenerator
             // Macro-scale continentalness (sampled once per lattice column)
             // Tweak the divisor (2000.0) to make continents larger or smaller.
             double continentalness = _continentalNoise.Sample(
-                cellX * 4 / 2000.0, 
-                0, 
-                cellZ * 4 / 2000.0);
+                cellX * 4 / ContinentalNoiseScale,
+                0,
+                cellZ * 4 / ContinentalNoiseScale);
 
             double variation =
                 Math.Clamp(
@@ -96,10 +105,32 @@ public class TerrainGenerator
 
             // Height offset now incorporates continental noise safely
             double heightOffset =
-                BaseHeight + (continentalness * 0.5) + (depthN * DepthInfluence);
+                BaseHeight
+                + (continentalness * ContinentalHeightInfluence)
+                + (depthN * DepthInfluence);
 
             double centerCell =
                 GY / 2.0 + heightOffset * (GY / 16.0) * 4.0;
+
+            // Convert the target terrain elevation to block coordinates.
+            // The current density lattice has eight blocks per vertical cell.
+            double targetHeight = centerCell * 8.0;
+
+            int maxTerrainY = World.Height - TerrainBuildHeightBuffer;
+            int fadeStartY = maxTerrainY - HighAltitudeFadeDepth;
+
+            // Compress high elevations smoothly instead of letting the terrain
+            // continue rising linearly toward the build height limit.
+            if (targetHeight > fadeStartY)
+            {
+                double excessHeight = targetHeight - fadeStartY;
+
+                targetHeight = fadeStartY +
+                    HighAltitudeFadeDepth *
+                    (1.0 - Math.Exp(-excessHeight / HighAltitudeFadeDepth));
+            }
+
+            centerCell = targetHeight / 8.0;
 
             for (int j = 0; j < GY; j++)
             {
@@ -212,11 +243,17 @@ public class TerrainGenerator
                     {
                         double v = Lerp(dz / 4.0, ab, ce);
 
+                        int maxTerrainY = World.Height - TerrainBuildHeightBuffer;
+
                         byte block = v > 0
                             ? _stoneId
                             : y < World.SeaLevel
                                 ? _waterId
                                 : _airId;
+
+                        // Absolute safety cap: no terrain or water above this elevation.
+                        if (y >= maxTerrainY)
+                            block = _airId;
 
                         col[
                             i * 4 + dx,

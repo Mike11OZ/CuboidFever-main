@@ -55,6 +55,33 @@ public sealed class FeatureContext
 
         return y;
     }
+    /// <summary>
+    /// Finds the highest terrain block at (x, z), ignoring leaves, logs,
+    /// water, and other decorations. Returns -1 if no terrain is found.
+    /// </summary>
+    public int TerrainSurfaceY(
+        int x,
+        int z,
+        byte grassId,
+        byte dirtId,
+        byte stoneId)
+    {
+        if ((uint)x >= (uint)Chunk.Size ||
+            (uint)z >= (uint)Chunk.Size)
+        {
+            return -1;
+        }
+
+        for (int y = World.Height - 1; y >= 0; y--)
+        {
+            byte id = _blocks[x, y, z];
+
+            if (id == grassId || id == dirtId || id == stoneId)
+                return y;
+        }
+
+        return -1;
+    }
 
     /// <summary>
     /// Places <paramref name="id"/> only if the target is inside the column and
@@ -66,6 +93,20 @@ public sealed class FeatureContext
             return false;
 
         _blocks[x, y, z] = id;
+        return true;
+    }
+
+    /// <summary>
+    /// Replaces a block only if the target is inside the column and currently
+    /// contains the expected block. Returns whether the replacement succeeded.
+    /// </summary>
+    public bool ReplaceIfBlock(
+        int x, int y, int z, byte expectedId, byte replacementId)
+    {
+        if (!InBounds(x, y, z) || _blocks[x, y, z] != expectedId)
+            return false;
+
+        _blocks[x, y, z] = replacementId;
         return true;
     }
 }

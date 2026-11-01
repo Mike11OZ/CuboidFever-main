@@ -32,6 +32,10 @@ public sealed class PlacedFeatures
         _features = new Feature[]
         {
             new OakTreeFeature(blocks),
+            new BigOakTreeFeature(blocks),
+            new PineTreeFeature(blocks),
+            new BigPineTreeFeature(blocks),
+            new Boulder(blocks)
         };
 
         EnsureUniqueSalts(_features);

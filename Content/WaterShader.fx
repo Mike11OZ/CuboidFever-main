@@ -172,8 +172,11 @@ float4 WaterPS(VertexShaderOutput input) : COLOR0
         foam = steep * crest * allowed;
     }
 
+    // Extract scalar brightness/lighting from vertex color (stripping out any color tint)
     float lit = max(baseColor.r, max(baseColor.g, baseColor.b));
-    float3 waterRgb = tex.rgb * baseColor * waterAlpha;
+
+    // Multiply texture color by lighting intensity and alpha instead of the tinted vertex color
+    float3 waterRgb = tex.rgb * lit * waterAlpha;
     float3 foamTex = lerp(tex.rgb, float3(1, 1, 1), FoamWhiteness);
     float3 foamRgb = foamTex * float3(lit, lit, lit);
 

@@ -10,8 +10,8 @@ namespace CuboidFever;
 public sealed class OakTreeFeature : Feature
 {
     // ---- Tunables ----
-    private const int SpawnOneIn = 50;        // 1-in-N chance per eligible grass cell
-    private const int MinTrunkHeight = 4;
+    private const int SpawnOneIn = 64;        // 1-in-N chance per eligible grass cell
+    private const int MinTrunkHeight = 5;
     private const int TrunkHeightVariance = 3; // trunk = Min + [0, Variance)
     private const int LowerCrownRadius = 2;
     private const int UpperCrownRadius = 1;
