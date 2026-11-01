@@ -26,7 +26,7 @@ public class Game1 : Game
     private Texture2D _atlas;
     private ParticleSystem _particleSystem = new();
     private World _world;
-    private AlphaTestEffect _solidEffect;
+    private Effect _solidEffect;
     private bool _spawned;
     private float _splashTimer = 0f; // Tracks elapsed time on startup
     private bool _lWasDown;
@@ -36,6 +36,9 @@ public class Game1 : Game
     private WindowManager _windowManager;
     private bool _f11WasDown; // For edge-triggered hotkey check
     private DebugOverlay _debugOverlay;
+    private readonly DayNightCycle _dayNight = new();
+    private bool _pWasDown;
+    private const float TimeScrubHoursPerSecond = 3f; // hold , or . to scrub the clock
 
     // ---- Camera ----
     private Player _player = new();
@@ -154,6 +157,8 @@ public class Game1 : Game
 
         BlockRegistry.Initialize(dataRoot);
         InputManager.Initialize();
+        _dayNight.LoadSettings(Path.Combine(dataRoot, "daynight.json"));
+        _dayNight.Reset();
 
         var blocks = BlockRegistry.Instance;
 
@@ -170,14 +175,7 @@ public class Game1 : Game
         _world = new World(8374173);
         _camPos = new Vector3(128.5f, 100f, 128.5f); // looking-from point while the first columns load
 
-        _solidEffect = new AlphaTestEffect(GraphicsDevice)
-        {
-            VertexColorEnabled = true,
-            Texture = _atlas,
-            AlphaFunction = CompareFunction.GreaterEqual,
-            ReferenceAlpha = 128,
-            Projection = _effect.Projection
-        };
+        _solidEffect = Content.Load<Effect>("SolidShader");
         _waterEffect = Content.Load<Effect>("WaterShader");
     }
 
@@ -226,7 +224,6 @@ public class Game1 : Game
             TrySpawn(dt);
 
             _effect.View = Matrix.CreateLookAt(_camPos, _camPos + _forward, Vector3.Up);
-            _solidEffect.View = _effect.View;
             base.Update(gameTime);
             return;
         }
@@ -236,6 +233,8 @@ public class Game1 : Game
         HandleFpsHotkey(kb);
         HandleLeafHotkey(kb);
         HandleAoHotkey(kb);
+        HandleTimeHotkeys(kb, dt);
+        _dayNight.Update(dt);
         UpdateCamera(kb, dt);
         HandleBlockSelection(kb, mouse);
         HandleBlockInteraction(mouse);
@@ -244,7 +243,6 @@ public class Game1 : Game
 
         _world.Update(GraphicsDevice, _camPos, totalTime);
         _effect.View = Matrix.CreateLookAt(_camPos, _camPos + _forward, Vector3.Up);
-        _solidEffect.View = _effect.View;
         base.Update(gameTime);
     }
     private void OnClientSizeChanged(object sender, EventArgs e)
@@ -258,7 +256,6 @@ public class Game1 : Game
                 500f);
 
             if (_effect != null) _effect.Projection = newProjection;
-            if (_solidEffect != null) _solidEffect.Projection = newProjection;
         }
     }
 
@@ -345,7 +342,7 @@ public class Game1 : Game
             if (targetBlock != _airId)
             {
                 _world.SetBlock(_target.x, _target.y, _target.z, _airId);
-                _particleSystem.SpawnBurst(_world, _target.x, _target.y, _target.z, targetBlock);
+                _particleSystem.SpawnBurst(_world, _target.x, _target.y, _target.z, targetBlock, _dayNight.SkyBrightness);
             }
         }
         if (rightClick && _targetPrev != _target)
@@ -371,14 +368,14 @@ public class Game1 : Game
 
         var frustum = new BoundingFrustum(_effect.View * _effect.Projection);
         _world.UpdateVisibility(frustum, _camPos, totalTime);
-        GraphicsDevice.Clear(Color.CornflowerBlue);
+        GraphicsDevice.Clear(_dayNight.SkyColor);
         GraphicsDevice.SamplerStates[0] = SamplerState.PointClamp;
 
         DrawWorld(frustum, totalTime);
         DrawHud();
 
         // Draw the debug overlay if F3 is active
-        _debugOverlay.Draw(_sprites, _world, _player, _fpsCaps[_capIndex], _slot, _hotbarNames, _windowManager);
+        _debugOverlay.Draw(_sprites, _world, _player, _fpsCaps[_capIndex], _slot, _hotbarNames, _windowManager, _dayNight);
 
         base.Draw(gameTime);
     }
@@ -388,6 +385,9 @@ public class Game1 : Game
         GraphicsDevice.BlendState = BlendState.Opaque;
         GraphicsDevice.DepthStencilState = DepthStencilState.Default;
         GraphicsDevice.RasterizerState = RasterizerState.CullCounterClockwise;
+        _solidEffect.Parameters["WorldViewProjection"]?.SetValue(_effect.View * _effect.Projection);
+        _solidEffect.Parameters["SpriteTexture"]?.SetValue(_atlas);
+        _solidEffect.Parameters["SkyBrightness"]?.SetValue(_dayNight.SkyBrightness);
         foreach (var pass in _solidEffect.CurrentTechnique.Passes)
         {
             pass.Apply();
@@ -405,6 +405,7 @@ public class Game1 : Game
         GraphicsDevice.DepthStencilState = DepthStencilState.DepthRead; // Disables depth writes so water layers don't clip each other
         GraphicsDevice.RasterizerState = RasterizerState.CullNone;
         WaterWaves.Apply(_waterEffect, _effect.View * _effect.Projection, _camPos, _atlas, totalTime);
+        _waterEffect.Parameters["SkyBrightness"]?.SetValue(_dayNight.SkyBrightness);
         foreach (var pass in _waterEffect.CurrentTechnique.Passes)
         {
             pass.Apply();
@@ -501,7 +502,16 @@ public class Game1 : Game
         }
         _lWasDown = down;
     }
+    // P pauses the clock; hold , to scrub backwards or . to scrub forwards.
+    private void HandleTimeHotkeys(KeyboardState kb, float dt)
+    {
+        bool pDown = kb.IsKeyDown(Keys.P);
+        if (pDown && !_pWasDown) _dayNight.Paused = !_dayNight.Paused;
+        _pWasDown = pDown;
 
+        if (kb.IsKeyDown(Keys.OemPeriod)) _dayNight.Scrub(TimeScrubHoursPerSecond * dt);
+        if (kb.IsKeyDown(Keys.OemComma)) _dayNight.Scrub(-TimeScrubHoursPerSecond * dt);
+    }
     private void HandleAoHotkey(KeyboardState kb)
     {
         bool down = kb.IsKeyDown(Keys.O);

@@ -42,7 +42,7 @@ public class DebugOverlay
         }
     }
 
-    public void Draw(SpriteBatch sprites, World world, Player player, int fpsCap, int slot, string[] hotbarNames, WindowManager windowManager)
+    public void Draw(SpriteBatch sprites, World world, Player player, int fpsCap, int slot, string[] hotbarNames, WindowManager windowManager, DayNightCycle dayNight)
     {
         if (!_isVisible || _font == null) return;
 
@@ -54,6 +54,7 @@ public class DebugOverlay
             $"Display: {windowManager.CurrentMode} ({windowManager.Width}x{windowManager.Height})\n" +
             $"FPS: {_currentFps} (cap: {fpsStr})\n" +
             $"Leaves: {ChunkMesher.LeafCullDepth} | AO: {(ChunkMesher.AmbientOcclusion ? "on" : "off")}\n" +
+            $"Time: {dayNight.TimeString} | Day: {dayNight.DayLengthSeconds:F0}s | Sky: {dayNight.SkyBrightness:F2}{(dayNight.Paused ? " | PAUSED" : "")}\n" +
             $"Chunks: {world.VisibleChunks}/{world.TotalChunks} | Queue: {world.PendingWork}\n" +
             $"XYZ: {player.Position.X:F2} / {player.Position.Y:F2} / {player.Position.Z:F2}\n" +
             $"Holding: {hotbarNames[slot]}";

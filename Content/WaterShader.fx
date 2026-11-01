@@ -13,6 +13,7 @@ matrix WorldViewProjection;
 float3 CameraPosition;
 float  WaveTime;
 float  WaveIntensity;
+float  SkyBrightness;   // 1 = full daylight, DayNightCycle.MinSkyBrightness at night
 
 float4 W0A, W0B;
 float4 W1A, W1B;
@@ -42,6 +43,7 @@ struct VertexShaderInput
     float4 Color    : COLOR0;
     float2 Uv       : TEXCOORD0;
     float2 Water    : TEXCOORD1;   // float weight matching float[] WaterW
+    float4 Sky      : COLOR1;      // sky light color, scaled by SkyBrightness below
 };
 
 struct VertexShaderOutput
@@ -120,7 +122,10 @@ VertexShaderOutput WaterVS(VertexShaderInput input)
     k = k * k * k;
     float alpha = clamp(AlphaMin + (AlphaMax - AlphaMin) * k, AlphaMin, AlphaMax);
 
-    output.Color = float4(input.Color.rgb, alpha);
+    // Block light vs. day-scaled sky light, same rule as SolidShader.fx
+    float3 litRgb = max(input.Color.rgb, input.Sky.rgb * SkyBrightness);
+    output.Color = float4(litRgb, alpha);
+    
     output.Data = float3(input.Position.x, input.Position.z, wType);
     return output;
 }

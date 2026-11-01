@@ -13,13 +13,19 @@
 
 #---------------------------------- Content ---------------------------------#
 
+#begin DebugFont.spritefont
+/importer:FontDescriptionImporter
+/processor:FontDescriptionProcessor
+/build:DebugFont.spritefont
+
 #begin WaterShader.fx
 /importer:EffectImporter
 /processor:EffectProcessor
 /processorParam:DebugMode=Auto
 /build:WaterShader.fx
 
-#begin DebugFont.spritefont
-/importer:FontDescriptionImporter
-/processor:FontDescriptionProcessor
-/build:DebugFont.spritefont
+#begin SolidShader.fx
+/importer:EffectImporter
+/processor:EffectProcessor
+/processorParam:DebugMode=Auto
+/build:SolidShader.fx

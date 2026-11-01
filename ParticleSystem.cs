@@ -48,12 +48,13 @@ public class ParticleSystem
         int by,
         int bz,
         byte blockId,
+        float skyBrightness = 1f,
         int count = 12)
     {
         var region = BlockRegistry.Instance.GetTextureRegion(blockId, 2);
         var bounds = region.PixelBounds;
 
-        Color color = LitTint(world, bx, by, bz, blockId);
+        Color color = LitTint(world, bx, by, bz, blockId, skyBrightness);
 
         var center = new Vector3(
             bx + 0.5f,
@@ -115,11 +116,13 @@ public class ParticleSystem
         int x,
         int y,
         int z,
-        byte id)
+        byte id,
+        float skyBrightness)
     {
         var L = world.Light;
 
-        float sky = Chunk.Curve[L.Get(0, x, y, z)];
+        // Sky light follows the time of day; lamp light does not
+        float sky = Chunk.Curve[L.Get(0, x, y, z)] * skyBrightness;
         float r = MathF.Max(sky, Chunk.Curve[L.Get(1, x, y, z)]);
         float g = MathF.Max(sky, Chunk.Curve[L.Get(2, x, y, z)]);
         float b = MathF.Max(sky, Chunk.Curve[L.Get(3, x, y, z)]);

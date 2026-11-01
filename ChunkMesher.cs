@@ -101,12 +101,12 @@ public static class ChunkMesher
     {
         public readonly List<byte> F = new();
         public readonly List<float> W = new(); // float[] list
-        public readonly List<VertexPositionColorTexture> V = new();
+        public readonly List<VertexPositionColorTextureSky> V = new();
         public readonly List<int> I = new();
 
         public void Clear() { V.Clear(); I.Clear(); F.Clear(); W.Clear(); }
 
-        public void AddFace(int f, Vector3 pos, Color color, TextureRegion region, float[] ao, float[] waveWeights, bool isWater)
+        public void AddFace(int f, Vector3 pos, Color color, Color skyColor, TextureRegion region, float[] ao, float[] waveWeights, bool isWater)
         {
             int start = V.Count;
             for (int c = 0; c < 4; c++)
@@ -122,6 +122,7 @@ public static class ChunkMesher
             Vector2[] uvs = f == 3 ? BottomUV : FaceUV;
 
             float r = color.R / 255f, g = color.G / 255f, b = color.B / 255f, a = color.A / 255f;
+            float sr = skyColor.R / 255f, sg = skyColor.G / 255f, sb = skyColor.B / 255f;
 
             for (int c = 0; c < 4; c++)
             {
@@ -135,8 +136,11 @@ public static class ChunkMesher
                 if (isWater && f != 3 && FaceCorners[f][c].Y > 0.5f)
                     vertexPos.Y -= WaterSurfaceInset;
 
-                V.Add(new VertexPositionColorTexture(
-                    vertexPos, new Color(r * k, g * k, b * k, a), uv));
+                   V.Add(new VertexPositionColorTextureSky(
+                        vertexPos,
+                        new Color(r * k, g * k, b * k, a),
+                        uv,
+                        new Color(sr * k, sg * k, sb * k, 1f)));
             }
 
             if (ao[0] + ao[2] > ao[1] + ao[3])
@@ -219,6 +223,7 @@ public static class ChunkMesher
 
     public static MeshData Build(Chunk chunk, Column[] cols, int version)
     {
+        public VertexPositionColorTextureSky[] SolidV, WaterV;
         var result = new MeshData { Chunk = chunk, Version = version };
         if (chunk.IsEmpty) return result;
 
@@ -283,9 +288,9 @@ public static class ChunkMesher
                 }
 
                 int lightSample = self.IsWater && f == 2 && info[nbId].Occludes ? i : n;
-                var color = LightColor(in self, f, lightSample, b.Light);
+                LightColors(in self, f, lightSample, b.Light, out var color, out var skyColor);
 
-                builder.AddFace(f, pos, color, registry.FastRegion(id, f), faceAo, waveWeights, self.IsWater);
+                builder.AddFace(f, pos, color, skyColor, registry.FastRegion(id, f), faceAo, waveWeights, self.IsWater);
             }
         }
 
@@ -362,18 +367,33 @@ public static class ChunkMesher
         }
     }
 
-    private static Color LightColor(in BlockInfo self, int face, int n, byte[][] light)
+    // Block light and sky light are kept in separate colors so the sky part can be scaled by the
+    // time of day at draw time. The shader combines them as max(block, sky * SkyBrightness), which at
+    // full brightness matches the old single baked color of max(sky, block) * shade * tint.
+    private static void LightColors(in BlockInfo self, int face, int n, byte[][] light,
+                                    out Color block, out Color sky)
     {
+        // Lamps ignore the sky entirely, so they stay at full brightness all night
         if (self.Emissive)
-            return new Color(self.TintR, self.TintG, self.TintB, 1f);
+        {
+            block = new Color(self.TintR, self.TintG, self.TintB, 1f);
+            sky = new Color(0f, 0f, 0f, 1f);
+            return;
+        }
 
         float shade = FaceShade[face];
-        float sky = Chunk.Curve[light[0][n]];
+        float s = Chunk.Curve[light[0][n]];
 
-        float r  = MathF.Max(sky, Chunk.Curve[light[1][n]]) * shade * self.TintR;
-        float g  = MathF.Max(sky, Chunk.Curve[light[2][n]]) * shade * self.TintG;
-        float bl = MathF.Max(sky, Chunk.Curve[light[3][n]]) * shade * self.TintB;
+        block = new Color(
+            Chunk.Curve[light[1][n]] * shade * self.TintR,
+            Chunk.Curve[light[2][n]] * shade * self.TintG,
+            Chunk.Curve[light[3][n]] * shade * self.TintB,
+            1f);
 
-        return new Color(r, g, bl, 1f);
+        sky = new Color(
+            s * shade * self.TintR,
+            s * shade * self.TintG,
+            s * shade * self.TintB,
+            1f);
     }
 }

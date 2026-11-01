@@ -173,13 +173,13 @@ public class Chunk
             _tris = 0;
         }
 
-        public void Upload(GraphicsDevice device, VertexPositionColorTexture[] v, int[] idx)
+        public void Upload(GraphicsDevice device, VertexPositionColorTextureSky[] v, int[] idx)
         {
             Clear();
             if (v == null || idx == null || idx.Length == 0) return;
 
             _tris = idx.Length / 3;
-            _vb = new VertexBuffer(device, typeof(VertexPositionColorTexture), v.Length, BufferUsage.WriteOnly);
+            _vb = new VertexBuffer(device, VertexPositionColorTextureSky.VertexDeclaration, v.Length, BufferUsage.WriteOnly);
             _vb.SetData(v);
             _ib = new IndexBuffer(device, IndexElementSize.ThirtyTwoBits, idx.Length, BufferUsage.WriteOnly);
             _ib.SetData(idx);
@@ -214,7 +214,7 @@ public class Chunk
 
         public void Upload(
             GraphicsDevice device,
-            VertexPositionColorTexture[] v,
+            VertexPositionColorTextureSky[] v,
             int[] idx,
             byte[] faces,
             float[] shoreWeights)
@@ -230,12 +230,13 @@ public class Chunk
             var verts = new VertexPositionColorTextureWater[v.Length];
             for (int i = 0; i < v.Length; i++)
             {
-                verts[i] = new VertexPositionColorTextureWater(
+                   verts[i] = new VertexPositionColorTextureWater(
                     v[i].Position,
                     v[i].Color,
                     v[i].TextureCoordinate,
                     shoreWeights[i],
-                    faces[i]);
+                    faces[i],
+                    v[i].Sky);
             }
 
             _tris = idx.Length / 3;
