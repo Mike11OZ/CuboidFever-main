@@ -13,8 +13,6 @@ public class TerrainGenerator
     private readonly byte _dirtId;
     private readonly byte _sandId;
     private readonly byte _bedrockId;
-    private readonly byte _logId;
-    private readonly byte _leavesId;
 
     // ---- Tunables (tweak these while you experiment) ----
     private const double BaseHeight = 0.40;
@@ -43,8 +41,6 @@ public class TerrainGenerator
         _dirtId = blocks.GetId("cuboidfever:dirt");
         _sandId = blocks.GetId("cuboidfever:sand");
         _bedrockId = blocks.GetId("cuboidfever:bedrock");
-        _logId = blocks.GetId("cuboidfever:log");
-        _leavesId = blocks.GetId("cuboidfever:leaves");
 
         var r = new Random(seed);
 
@@ -64,85 +60,6 @@ public class TerrainGenerator
 
         FillFromDensity(density, col);
         SurfacePass(cx, cz, col);
-        PlaceTrees(cx, cz, col);
-    }
-
-    private void PlaceTrees(int cx, int cz, byte[,,] col)
-    {
-        var rng = new Random(
-            unchecked(_seed ^ 0x5EED ^
-            (cx * 73856093) ^ (cz * 19349663)));
-
-        for (int x = 2; x < 14; x++)
-        for (int z = 2; z < 14; z++)
-        {
-            if (rng.Next(50) != 0)
-                continue;
-
-            int y = World.Height - 1;
-
-            while (y > 0 && col[x, y, z] == _airId)
-                y--;
-
-            // Water and sand fail this check, preventing seabed trees.
-            if (col[x, y, z] != _grassId)
-                continue;
-
-            int h = 4 + rng.Next(3);
-
-            if (y + h + 2 >= World.Height)
-                continue;
-
-            // Tree trunk.
-            for (int i = 1; i <= h; i++)
-                PutBlock(col, x, y + i, z, _logId);
-
-            // Tree leaves.
-            int top = y + h;
-
-            for (int ly = top - 2; ly <= top + 1; ly++)
-            {
-                int r = ly >= top ? 1 : 2;
-
-                for (int dx = -r; dx <= r; dx++)
-                for (int dz = -r; dz <= r; dz++)
-                {
-                    bool corner =
-                        Math.Abs(dx) == r &&
-                        Math.Abs(dz) == r;
-
-                    if (corner &&
-                        (ly >= top || rng.Next(2) == 0))
-                        continue;
-
-                    PutBlock(
-                        col,
-                        x + dx,
-                        ly,
-                        z + dz,
-                        _leavesId);
-                }
-            }
-        }
-    }
-
-    // Places a block only if the target position contains air.
-    private void PutBlock(
-        byte[,,] col,
-        int x,
-        int y,
-        int z,
-        byte id)
-    {
-        if (x < 0 || x >= 16 ||
-            z < 0 || z >= 16 ||
-            y < 0 || y >= World.Height)
-            return;
-
-        if (col[x, y, z] != _airId)
-            return;
-
-        col[x, y, z] = id;
     }
 
     private double[,,] BuildDensityLattice(int cx, int cz)

@@ -34,6 +34,7 @@ public class World
     private readonly ConcurrentQueue<MeshData> _meshed = new();
 
     private readonly TerrainGenerator _gen;
+    private readonly PlacedFeatures _features;
     private readonly WorkerPool _pool;
      private readonly int _maxGenInFlight, _maxMeshInFlight;
     private (int x, int z) _lastCenter = (int.MinValue, 0);
@@ -47,6 +48,7 @@ public class World
         _waterId = BlockRegistry.Instance.GetId("cuboidfever:water");
 
         _gen = new TerrainGenerator(seed);
+        _features = new PlacedFeatures(seed, BlockRegistry.Instance);
         Light = new LightMap(this);
         _pool = new WorkerPool(Math.Clamp(Environment.ProcessorCount - 2, 2, 8));
         _maxGenInFlight = _pool.Count + 2;
@@ -155,7 +157,8 @@ public class World
     private void GenerateJob(int cx, int cz)
     {
         var blocks = new byte[Chunk.Size, Height, Chunk.Size];
-        _gen.GenerateColumn(cx, cz, blocks);
+        _gen.GenerateColumn(cx, cz, blocks);   // terrain shape + surface
+        _features.Generate(cx, cz, blocks);    // trees, rocks, etc.
 
         var col = new Column(cx, cz);
         for (int cy = 0; cy < ChunksY; cy++)

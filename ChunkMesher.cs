@@ -38,7 +38,7 @@ public static class ChunkMesher
 
     public static bool AmbientOcclusion = true;
 
-    private static readonly float[] AoCurve = { 0.7f, 0.85f, 0.93f, 1.0f };
+    private static readonly float[] AoCurve = { 0.1f, 0.25f, 0.5f, 1.0f };
     private static readonly float[] Flat = { 1f, 1f, 1f, 1f };
 
     private static readonly int[,,] AoIdx = BuildAo();
@@ -141,13 +141,15 @@ public static class ChunkMesher
 
             if (ao[0] + ao[2] > ao[1] + ao[3])
             {
-                I.Add(start + 1); I.Add(start + 2); I.Add(start + 3);
-                I.Add(start + 1); I.Add(start + 3); I.Add(start);
+                // diagonal 0-2 (the brighter pair)
+                I.Add(start);     I.Add(start + 1); I.Add(start + 2);
+                I.Add(start);     I.Add(start + 2); I.Add(start + 3);
             }
             else
             {
-                I.Add(start);     I.Add(start + 1); I.Add(start + 2);
-                I.Add(start);     I.Add(start + 2); I.Add(start + 3);
+                // diagonal 1-3
+                I.Add(start + 1); I.Add(start + 2); I.Add(start + 3);
+                I.Add(start + 1); I.Add(start + 3); I.Add(start);
             }
         }
     }

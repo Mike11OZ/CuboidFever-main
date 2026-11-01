@@ -10,7 +10,7 @@ namespace CuboidFever;
 public static class WaterWaves
 {
     // ---- Runtime-tweakable settings ----
-    public static float Intensity = 1.0f;   // scales every wave (was Chunk.WaterWaveIntensity)
+    public static float Intensity = 0.25f;   // scales every wave (was Chunk.WaterWaveIntensity)
     public static float Speed     = 0.8f;   // animation speed     (was Chunk.WaterWaveSpeed)
 
     // ---- Whitecap tuning ----
