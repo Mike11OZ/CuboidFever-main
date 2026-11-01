@@ -1,5 +1,5 @@
-  { 
-    "dayLengthSeconds": 600, 
-    "startHour": 8.0, 
-    "minSkyBrightness": 0.12 
+{
+  "dayLengthSeconds": 600,
+  "startHour": 8.0,
+  "nightSkyLight": 3
 }

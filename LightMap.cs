@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace CuboidFever;
@@ -41,6 +42,15 @@ public class LightMap
         if (c == null) return 0;
         return c.Light[ch][Column.LIdx(x & 15, y, z & 15)];
     }
+
+    // Sky light as it is right now: the stored level minus the day/night darkness.
+    public int GetSkyNow(int x, int y, int z) => Math.Max(0, Get(0, x, y, z) - _world.SkyDarkness);
+
+    // Overall light level for gameplay checks such as mob spawning:
+    // the brightest of the current sky light and the three lamp channels.
+    public int GetCombined(int x, int y, int z) =>
+        Math.Max(GetSkyNow(x, y, z),
+                 Math.Max(Get(1, x, y, z), Math.Max(Get(2, x, y, z), Get(3, x, y, z))));
 
     private void Set(int ch, int x, int y, int z, int v)
     {

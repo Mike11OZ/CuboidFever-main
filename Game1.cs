@@ -235,6 +235,7 @@ public class Game1 : Game
         HandleAoHotkey(kb);
         HandleTimeHotkeys(kb, dt);
         _dayNight.Update(dt);
+        _world.SkyDarkness = _dayNight.SkyDarknessLevels;
         UpdateCamera(kb, dt);
         HandleBlockSelection(kb, mouse);
         HandleBlockInteraction(mouse);
@@ -375,7 +376,8 @@ public class Game1 : Game
         DrawHud();
 
         // Draw the debug overlay if F3 is active
-        _debugOverlay.Draw(_sprites, _world, _player, _fpsCaps[_capIndex], _slot, _hotbarNames, _windowManager, _dayNight);
+        _debugOverlay.Draw(_sprites, _world, _player, _fpsCaps[_capIndex], _slot, _hotbarNames, _windowManager, _dayNight,
+                   _hasTarget, _target, _targetPrev);
 
         base.Draw(gameTime);
     }

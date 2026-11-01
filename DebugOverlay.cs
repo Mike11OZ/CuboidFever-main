@@ -42,27 +42,53 @@ public class DebugOverlay
         }
     }
 
-    public void Draw(SpriteBatch sprites, World world, Player player, int fpsCap, int slot, string[] hotbarNames, WindowManager windowManager, DayNightCycle dayNight)
+    public void Draw(SpriteBatch sprites, World world, Player player, int fpsCap, int slot, string[] hotbarNames,
+                    WindowManager windowManager, DayNightCycle dayNight,
+                    bool hasTarget, (int x, int y, int z) target, (int x, int y, int z) targetPrev)
     {
         if (!_isVisible || _font == null) return;
 
         int cap = fpsCap;
         string fpsStr = cap == 0 ? "none" : cap.ToString();
-        
-        string debugText = 
+
+        string debugText =
             $"{GameInfo.FullTitle}\n" +
             $"Display: {windowManager.CurrentMode} ({windowManager.Width}x{windowManager.Height})\n" +
             $"FPS: {_currentFps} (cap: {fpsStr})\n" +
             $"Leaves: {ChunkMesher.LeafCullDepth} | AO: {(ChunkMesher.AmbientOcclusion ? "on" : "off")}\n" +
-            $"Time: {dayNight.TimeString} | Day: {dayNight.DayLengthSeconds:F0}s | Sky: {dayNight.SkyBrightness:F2}{(dayNight.Paused ? " | PAUSED" : "")}\n" +
+            $"Time: {dayNight.TimeString} | Day: {dayNight.DayLengthSeconds:F0}s | Sky darkness: -{dayNight.SkyDarknessLevels}{(dayNight.Paused ? " | PAUSED" : "")}\n" +
             $"Chunks: {world.VisibleChunks}/{world.TotalChunks} | Queue: {world.PendingWork}\n" +
             $"XYZ: {player.Position.X:F2} / {player.Position.Y:F2} / {player.Position.Z:F2}\n" +
-            $"Holding: {hotbarNames[slot]}";
+            $"Holding: {hotbarNames[slot]}\n\n" +
+            HighlightedBlockText(world, hasTarget, target, targetPrev);
 
         sprites.Begin(samplerState: SamplerState.PointClamp);
         // Retro drop shadow effect for clean readability
         sprites.DrawString(_font, debugText, new Vector2(11, 11), Color.Black);
         sprites.DrawString(_font, debugText, new Vector2(10, 10), Color.White);
         sprites.End();
+    }
+
+    private static string HighlightedBlockText(World world, bool hasTarget,
+                                            (int x, int y, int z) target, (int x, int y, int z) front)
+    {
+        if (!hasTarget) return "Highlighted: none";
+
+        byte id = world.GetBlock(target.x, target.y, target.z);
+        string name = BlockRegistry.Instance.GetName(id);
+        name = name.Substring(name.IndexOf(':') + 1).Replace('_', ' ');
+
+        return
+            $"Highlighted: {name} @ {target.x} {target.y} {target.z}\n" +
+            $"  Light in front ({front.x} {front.y} {front.z}): {LightString(world, front)}\n" +
+            $"  Light in block: {LightString(world, target)}";
+    }
+    
+    private static string LightString(World world, (int x, int y, int z) p)
+    {
+        var light = world.Light;
+        return $"Sky {light.Get(0, p.x, p.y, p.z)} -> {light.GetSkyNow(p.x, p.y, p.z)} | " +
+            $"R {light.Get(1, p.x, p.y, p.z)} | G {light.Get(2, p.x, p.y, p.z)} | B {light.Get(3, p.x, p.y, p.z)} | " +
+            $"Total {light.GetCombined(p.x, p.y, p.z)}";
     }
 }

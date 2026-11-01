@@ -9,7 +9,7 @@ public sealed class MeshData
 {
     public Chunk Chunk;
     public int Version;
-    public VertexPositionColorTexture[] SolidV, WaterV;
+    public VertexPositionColorTextureSky[] SolidV, WaterV;
     public int[] SolidI, WaterI;
     public byte[] WaterF;
     public float[] WaterW; // Per-vertex wave weight (float[] expected by Chunk.cs)
@@ -223,7 +223,6 @@ public static class ChunkMesher
 
     public static MeshData Build(Chunk chunk, Column[] cols, int version)
     {
-        public VertexPositionColorTextureSky[] SolidV, WaterV;
         var result = new MeshData { Chunk = chunk, Version = version };
         if (chunk.IsEmpty) return result;
 

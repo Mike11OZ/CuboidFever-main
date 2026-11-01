@@ -40,6 +40,8 @@ public class World
     private (int x, int z) _lastCenter = (int.MinValue, 0);
 
     public readonly LightMap Light;
+    // Light levels the sky is currently darkened by (set from the day/night cycle each frame)
+    public int SkyDarkness;
 
     public World(int seed)
     {
