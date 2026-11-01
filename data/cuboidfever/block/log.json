@@ -12,6 +12,8 @@
   },
   "tint": [255, 255, 255],
   "textures": {
-    "all": "cuboidfever:log"
+    "all": "cuboidfever:log",
+    "top": "cuboidfever:log_top",
+    "bottom": "cuboidfever:log_top"
   }
 }

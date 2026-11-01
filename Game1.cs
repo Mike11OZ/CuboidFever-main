@@ -18,6 +18,7 @@ public class Game1 : Game
     private const float ReachDistance = 5f; // Easy to tweak here!
     
     // ---- Core ----
+    private StartupScreen _startupScreen = new();
     private GraphicsDeviceManager _graphics;
     private BasicEffect _effect;
     private BasicEffect _lineEffect;
@@ -27,10 +28,14 @@ public class Game1 : Game
     private World _world;
     private AlphaTestEffect _solidEffect;
     private bool _spawned;
+    private float _splashTimer = 0f; // Tracks elapsed time on startup
     private bool _lWasDown;
     private bool _oWasDown;
     private bool _vWasDown;
     private byte _airId;
+    private WindowManager _windowManager;
+    private bool _f11WasDown; // For edge-triggered hotkey check
+    private DebugOverlay _debugOverlay;
 
     // ---- Camera ----
     private Player _player = new();
@@ -65,12 +70,13 @@ public class Game1 : Game
 
         // This bridges Debug.WriteLine over to the standard output stream
         System.Diagnostics.Trace.Listeners.Add(new System.Diagnostics.ConsoleTraceListener());
-        
 
         // Redirect standard output so Console.WriteLine works in the new window
         Console.SetOut(new StreamWriter(Console.OpenStandardOutput()) { AutoFlush = true });
 
         Console.WriteLine("Console window initialized! Debug output is live.");
+
+        Console.WriteLine($"Initializing {GameInfo.FullTitle}...");
 
         _graphics = new GraphicsDeviceManager(this);
         Content.RootDirectory = "Content";
@@ -102,9 +108,28 @@ public class Game1 : Game
             textureRoot,
             atlasConfigPath);
 
+        _startupScreen.LoadContent(GraphicsDevice);
+
         _atlas = TextureAtlas.Instance.Texture;
 
         _particleSystem.Init(TextureAtlas.Instance);
+
+        _windowManager = new WindowManager(_graphics, Window);
+
+        // Subscribe to resize events so our 3D projection aspect ratio updates automatically
+        Window.ClientSizeChanged += OnClientSizeChanged;
+
+        // Load your debug font from Content
+        SpriteFont debugFont = null;
+        try
+        {
+            debugFont = Content.Load<SpriteFont>("DebugFont");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Warning] DebugFont.xnb not found. On-screen debug overlay disabled. ({ex.Message})");
+        }
+        _debugOverlay = new DebugOverlay(debugFont);
 
         _effect = new BasicEffect(GraphicsDevice)
         {
@@ -156,9 +181,15 @@ public class Game1 : Game
         _waterEffect = Content.Load<Effect>("WaterShader");
     }
 
-    private void TrySpawn()
+    private void TrySpawn(float dt)
     {
+        _splashTimer += dt;
+
+        // Keep showing the splash screen until at least 3 seconds have passed
+        if (_splashTimer < 3.0f) return;
+
         int sx = 128, sz = 128;
+        // Also ensure the initial spawn column is fully generated
         if (!_world.IsColumnLoaded(sx, sz)) return;
 
         int sy = World.Height - 1;
@@ -166,7 +197,9 @@ public class Game1 : Game
         _player.Position = new Vector3(sx + 0.5f, sy + 1.01f, sz + 0.5f);
         _camPos = _player.Eye;
         Mouse.SetPosition(Window.ClientBounds.Width / 2, Window.ClientBounds.Height / 2);
-        _spawned = true;
+        
+        // This triggers the transition from splash screen to gameplay!
+        _spawned = true; 
     }
 
     // =====================  UPDATE  =====================
@@ -179,23 +212,27 @@ public class Game1 : Game
         var kb = Keyboard.GetState();
         var mouse = Mouse.GetState();
         
-        // Inside your Update method in Game1.cs
         if (Keyboard.GetState().IsKeyDown(Keys.Escape))
         {
-            this.Exit(); // Gracefully stops game.Run() and returns control to Program.cs
+            this.Exit();
         }
 
         if (!_spawned)
         {
             _forward = Vector3.Forward;
             _world.Update(GraphicsDevice, _camPos, totalTime);
-            TrySpawn();
+            
+            // Pass delta time into TrySpawn to tick our 3-second splash timer
+            TrySpawn(dt);
+
             _effect.View = Matrix.CreateLookAt(_camPos, _camPos + _forward, Vector3.Up);
             _solidEffect.View = _effect.View;
             base.Update(gameTime);
             return;
         }
-
+        HandleWindowModeHotkey(kb);
+        _debugOverlay.HandleInput(kb);
+        _debugOverlay.Update(gameTime);
         HandleFpsHotkey(kb);
         HandleLeafHotkey(kb);
         HandleAoHotkey(kb);
@@ -209,6 +246,20 @@ public class Game1 : Game
         _effect.View = Matrix.CreateLookAt(_camPos, _camPos + _forward, Vector3.Up);
         _solidEffect.View = _effect.View;
         base.Update(gameTime);
+    }
+    private void OnClientSizeChanged(object sender, EventArgs e)
+    {
+        if (GraphicsDevice.Viewport.Width > 0 && GraphicsDevice.Viewport.Height > 0)
+        {
+            var newProjection = Matrix.CreatePerspectiveFieldOfView(
+                MathHelper.ToRadians(70f),
+                GraphicsDevice.Viewport.AspectRatio,
+                0.1f,
+                500f);
+
+            if (_effect != null) _effect.Projection = newProjection;
+            if (_solidEffect != null) _solidEffect.Projection = newProjection;
+        }
     }
 
     private void HandleFpsHotkey(KeyboardState kb)
@@ -309,6 +360,15 @@ public class Game1 : Game
     protected override void Draw(GameTime gameTime)
     {
         float totalTime = (float)gameTime.TotalGameTime.TotalSeconds;
+
+        // If the player hasn't spawned yet, render the startup screen instead of the world
+        if (!_spawned)
+        {
+            _startupScreen.Draw(_sprites, GraphicsDevice);
+            base.Draw(gameTime);
+            return;
+        }
+
         var frustum = new BoundingFrustum(_effect.View * _effect.Projection);
         _world.UpdateVisibility(frustum, _camPos, totalTime);
         GraphicsDevice.Clear(Color.CornflowerBlue);
@@ -316,7 +376,9 @@ public class Game1 : Game
 
         DrawWorld(frustum, totalTime);
         DrawHud();
-        UpdateTitle(gameTime);
+
+        // Draw the debug overlay if F3 is active
+        _debugOverlay.Draw(_sprites, _world, _player, _fpsCaps[_capIndex], _slot, _hotbarNames, _windowManager);
 
         base.Draw(gameTime);
     }
@@ -417,6 +479,16 @@ public class Game1 : Game
             IsFixedTimeStep = true;
             TargetElapsedTime = TimeSpan.FromSeconds(1.0 / cap);
         }
+    }
+
+    private void HandleWindowModeHotkey(KeyboardState kb)
+    {
+        bool f11Down = kb.IsKeyDown(Keys.F11);
+        if (f11Down && !_f11WasDown)
+        {
+            _windowManager.CycleNextMode();
+        }
+        _f11WasDown = f11Down;
     }
 
     private void HandleLeafHotkey(KeyboardState kb)
