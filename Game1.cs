@@ -20,25 +20,29 @@ public class Game1 : Game
     // ---- Core ----
     private StartupScreen _startupScreen = new();
     private GraphicsDeviceManager _graphics;
-    private BasicEffect _effect;
-    private BasicEffect _lineEffect;
-    private Effect _waterEffect;
-    private Texture2D _atlas;
+    private BasicEffect _effect = null!;
+    private BasicEffect _lineEffect = null!;
+    private Effect _waterEffect = null!;
+    private Texture2D _atlas = null!;
     private ParticleSystem _particleSystem = new();
-    private World _world;
-    private Effect _solidEffect;
+    private World _world = null!;
+    private Effect _solidEffect = null!;
     private bool _spawned;
     private float _splashTimer = 0f; // Tracks elapsed time on startup
     private bool _lWasDown;
     private bool _oWasDown;
     private bool _vWasDown;
     private byte _airId;
-    private WindowManager _windowManager;
+    private WindowManager _windowManager = null!;
     private bool _f11WasDown; // For edge-triggered hotkey check
-    private DebugOverlay _debugOverlay;
+    private DebugOverlay _debugOverlay = null!;
     private readonly DayNightCycle _dayNight = new();
     private bool _pWasDown;
     private const float TimeScrubHoursPerSecond = 3f; // hold , or . to scrub the clock
+    
+    // ---- Audio ----
+    private AudioManager _audioManager = new();
+    private const float SongLoopDelay = 4.0f; // Configurable delay between loops
 
     // ---- Camera ----
     private Player _player = new();
@@ -50,13 +54,13 @@ public class Game1 : Game
     private MouseState _prevMouse;
     private bool _hasTarget;
     private (int x, int y, int z) _target, _targetPrev;
-    private byte[] _hotbar;
-    private string[] _hotbarNames;
+    private byte[] _hotbar = null!;
+    private string[] _hotbarNames = null!;
     private int _slot = 2;
 
     // ---- HUD ----
-    private SpriteBatch _sprites;
-    private Texture2D _pixel;
+    private SpriteBatch _sprites = null!;
+    private Texture2D _pixel = null!;
 
     // ---- FPS counter and cap ----
     private int _frames;
@@ -74,11 +78,7 @@ public class Game1 : Game
         // This bridges Debug.WriteLine over to the standard output stream
         System.Diagnostics.Trace.Listeners.Add(new System.Diagnostics.ConsoleTraceListener());
 
-        // Redirect standard output so Console.WriteLine works in the new window
-        Console.SetOut(new StreamWriter(Console.OpenStandardOutput()) { AutoFlush = true });
-
         Console.WriteLine("Console window initialized! Debug output is live.");
-
         Console.WriteLine($"Initializing {GameInfo.FullTitle}...");
 
         _graphics = new GraphicsDeviceManager(this);
@@ -123,7 +123,7 @@ public class Game1 : Game
         Window.ClientSizeChanged += OnClientSizeChanged;
 
         // Load your debug font from Content
-        SpriteFont debugFont = null;
+        SpriteFont debugFont = null!;
         try
         {
             debugFont = Content.Load<SpriteFont>("DebugFont");
@@ -177,6 +177,11 @@ public class Game1 : Game
 
         _solidEffect = Content.Load<Effect>("SolidShader");
         _waterEffect = Content.Load<Effect>("WaterShader");
+
+        // ---- Initialize Audio Handler ----
+        _audioManager = new AudioManager();
+        _audioManager.Volume = 0.8f;
+        _audioManager.PlayMusic("cuboid", SongLoopDelay);
     }
 
     private void TrySpawn(float dt)
@@ -215,6 +220,9 @@ public class Game1 : Game
             this.Exit();
         }
 
+        // Tick the audio handler every frame
+        _audioManager.Update(gameTime);
+
         if (!_spawned)
         {
             _forward = Vector3.Forward;
@@ -246,6 +254,7 @@ public class Game1 : Game
         _effect.View = Matrix.CreateLookAt(_camPos, _camPos + _forward, Vector3.Up);
         base.Update(gameTime);
     }
+
     private void OnClientSizeChanged(object sender, EventArgs e)
     {
         if (GraphicsDevice.Viewport.Width > 0 && GraphicsDevice.Viewport.Height > 0)
@@ -310,7 +319,7 @@ public class Game1 : Game
 
         float vertical = (kb.IsKeyDown(Keys.Space) ? 1f : 0f) - (kb.IsKeyDown(Keys.LeftShift) ? 1f : 0f);
         bool groundLoaded = _world.IsColumnLoaded((int)MathF.Floor(_player.Position.X),
-                                                (int)MathF.Floor(_player.Position.Z));
+                                                    (int)MathF.Floor(_player.Position.Z));
         if (_player.Flying || groundLoaded)
             _player.Update(_world, dt, wish, kb.IsKeyDown(Keys.Space), vertical);
 
@@ -375,9 +384,9 @@ public class Game1 : Game
         DrawWorld(frustum, totalTime);
         DrawHud();
 
-        // Draw the debug overlay if F3 is active
-        _debugOverlay.Draw(_sprites, _world, _player, _fpsCaps[_capIndex], _slot, _hotbarNames, _windowManager, _dayNight,
-                   _hasTarget, _target, _targetPrev);
+        // Inside Game1.Draw():
+        _debugOverlay.Draw(_sprites, _world, _player, _fpsCaps[_capIndex], _slot, _hotbarNames, _windowManager, _dayNight, _audioManager.CurrentSongName,
+                _hasTarget, _target, _targetPrev);
 
         base.Draw(gameTime);
     }
@@ -504,6 +513,7 @@ public class Game1 : Game
         }
         _lWasDown = down;
     }
+
     // P pauses the clock; hold , to scrub backwards or . to scrub forwards.
     private void HandleTimeHotkeys(KeyboardState kb, float dt)
     {
@@ -514,6 +524,7 @@ public class Game1 : Game
         if (kb.IsKeyDown(Keys.OemPeriod)) _dayNight.Scrub(TimeScrubHoursPerSecond * dt);
         if (kb.IsKeyDown(Keys.OemComma)) _dayNight.Scrub(-TimeScrubHoursPerSecond * dt);
     }
+
     private void HandleAoHotkey(KeyboardState kb)
     {
         bool down = kb.IsKeyDown(Keys.O);
