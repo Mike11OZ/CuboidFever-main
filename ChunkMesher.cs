@@ -215,46 +215,6 @@ public static class ChunkMesher
         return 1f;
     }
 
-    // Offsets to the 8 horizontal neighbors, in the bit order the water shader expects:
-    // 0:+x  1:-x  2:+z  3:-z  4:+x+z  5:+x-z  6:-x+z  7:-x-z
-    private static readonly int[] ShoreOffsets = { 1, -1, P, -P, 1 + P, 1 - P, -1 + P, -1 - P };
-
-    private static readonly int[] DiagA = { 1, 1, -1, -1 };
-    private static readonly int[] DiagB = { P, -P, P, -P };
-
-    // A water cell that will actually draw an uncovered top face (so it will also draw foam).
-    private static bool IsFoamWater(byte[] blocks, BlockInfo[] info, int n)
-    {
-        if (!info[blocks[n]].IsWater) return false;
-        ref readonly BlockInfo above = ref info[blocks[n + PP]];
-        return !above.Occludes && !above.IsWater;
-    }
-
-    private static int ShoreMask(byte[] blocks, BlockInfo[] info, int cell)
-    {
-        int mask = 0;
-
-        // Edge neighbors: unchanged.
-        for (int bit = 0; bit < 4; bit++)
-        {
-            int n = cell + ShoreOffsets[bit];
-            if (info[blocks[n]].Occludes || info[blocks[n + PP]].Occludes) mask |= 1 << bit;
-        }
-
-        // Corner neighbors: only when the corner is solid AND both edge cells beside it
-        // are foam-capable water, so the square always connects to two bands.
-        for (int k = 0; k < 4; k++)
-        {
-            int n = cell + DiagA[k] + DiagB[k];
-            if (!(info[blocks[n]].Occludes || info[blocks[n + PP]].Occludes)) continue;
-
-            if (IsFoamWater(blocks, info, cell + DiagA[k]) && IsFoamWater(blocks, info, cell + DiagB[k]))
-                mask |= 1 << (4 + k);
-        }
-
-        return mask;
-    }
-
     public static MeshData Build(Chunk chunk, Column[] cols, int version)
     {
         var result = new MeshData { Chunk = chunk, Version = version };
@@ -306,16 +266,13 @@ public static class ChunkMesher
 
                 if (self.IsWater)
                 {
-                    // Top faces also carry the shoreline mask, packed above the wave weight as (1 + mask) * 4.
-                    float shoreCode = f == 2 ? 1f + ShoreMask(b.Blocks, info, i) : 0f;
-
                     for (int v = 0; v < 4; v++)
                     {
                         Vector3 corner = FaceCorners[f][v];
                         bool followsSurface = f == 2 || (f != 3 && corner.Y > 0.5f);
-                        waveWeights[v] = (followsSurface
+                        waveWeights[v] = followsSurface
                             ? ShoreWaveWeight(b.Blocks, info, i, corner)
-                            : 0f) + 4f * shoreCode;
+                            : 0f;
                     }
                 }
                 else

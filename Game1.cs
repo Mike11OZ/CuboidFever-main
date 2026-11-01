@@ -199,7 +199,6 @@ public class Game1 : Game
         HandleFpsHotkey(kb);
         HandleLeafHotkey(kb);
         HandleAoHotkey(kb);
-        HandleProbeHotkey(kb);
         UpdateCamera(kb, dt);
         HandleBlockSelection(kb, mouse);
         HandleBlockInteraction(mouse);
@@ -221,57 +220,6 @@ public class Game1 : Game
             ApplyFpsCap();
         }
         _fWasDown = fDown;
-    }
-
-    private bool _pWasDown;
-
-    private void HandleProbeHotkey(KeyboardState kb)
-    {
-        bool down = kb.IsKeyDown(Keys.P);
-        if (down && !_pWasDown) ProbeShore();
-        _pWasDown = down;
-    }
-
-    private void ProbeShore()
-    {
-        var info = BlockRegistry.Instance.Info;
-
-        // March the view ray until it enters a water cell: that's the cell under the crosshair.
-        int cx = 0, cy = 0, cz = 0;
-        bool found = false;
-        for (float t = 0f; t < 40f; t += 0.02f)
-        {
-            Vector3 p = _camPos + _forward * t;
-            int x = (int)MathF.Floor(p.X), y = (int)MathF.Floor(p.Y), z = (int)MathF.Floor(p.Z);
-            if (info[_world.GetBlock(x, y, z)].IsWater) { cx = x; cy = y; cz = z; found = true; break; }
-        }
-        if (!found) { Console.WriteLine("[probe] ray never entered water"); return; }
-
-        char Ch(int x, int y, int z)
-        {
-            var bi = info[_world.GetBlock(x, y, z)];
-            return bi.IsAir ? '.' : bi.IsWater ? 'w' : bi.Occludes ? '#' : '?';
-        }
-
-        Console.WriteLine($"[probe] water cell {cx},{cy},{cz}  (chunk-local x={cx & 15} z={cz & 15} y={cy & 15})");
-        Console.WriteLine("        legend: . air   w water   # occluding solid   ? other non-occluding   (columns x-1..x+1, rows z+1 down to z-1)");
-        foreach (int dy in new[] { 2, 1, 0, -1 })
-        {
-            Console.WriteLine($"  y{(dy >= 0 ? "+" : "")}{dy}:");
-            for (int dz = 1; dz >= -1; dz--)
-            {
-                var row = new System.Text.StringBuilder("      ");
-                for (int dx = -1; dx <= 1; dx++)
-                    row.Append(Ch(cx + dx, cy + dy, cz + dz)).Append(' ');
-                Console.WriteLine(row.ToString());
-            }
-        }
-
-        // Same test the mesher uses for the 8-neighbor mask: solid at y or y+1.
-        bool S(int dx, int dz) => info[_world.GetBlock(cx + dx, cy, cz + dz)].Occludes
-                            || info[_world.GetBlock(cx + dx, cy + 1, cz + dz)].Occludes;
-        Console.WriteLine($"[probe] mask edges: +x={S(1,0)} -x={S(-1,0)} +z={S(0,1)} -z={S(0,-1)}");
-        Console.WriteLine($"[probe] mask corners: +x+z={S(1,1)} +x-z={S(1,-1)} -x+z={S(-1,1)} -x-z={S(-1,-1)}");
     }
 
     private void UpdateCamera(KeyboardState kb, float dt)
