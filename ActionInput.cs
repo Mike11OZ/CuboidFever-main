@@ -1,0 +1,51 @@
+using Microsoft.Xna.Framework.Input;
+
+namespace CuboidFever;
+
+// Polls the keyboard and mouse once per frame and answers questions in terms of actions.
+// This is the only place that does edge detection, so no other class needs "wasDown" fields.
+public sealed class ActionInput
+{
+    private readonly KeyBindings _bindings;
+    private KeyboardState _kb, _prevKb;
+    private MouseState _mouse, _prevMouse;
+
+    public ActionInput(KeyBindings bindings) => _bindings = bindings;
+
+    public KeyBindings Bindings => _bindings;
+
+    // How far the mouse wheel moved since the last frame (positive = scrolled up).
+    public int ScrollDelta => _mouse.ScrollWheelValue - _prevMouse.ScrollWheelValue;
+
+    // Call exactly once per frame, at the top of Game1.Update.
+    public void Update(KeyboardState kb, MouseState mouse)
+    {
+        _prevKb = _kb;
+        _prevMouse = _mouse;
+        _kb = kb;
+        _mouse = mouse;
+    }
+
+    // True every frame the input is held.
+    public bool IsDown(GameAction action) => IsDown(_bindings.Get(action), _kb, _mouse);
+
+    // True only on the frame the input goes from up to down.
+    public bool WasPressed(GameAction action)
+    {
+        var b = _bindings.Get(action);
+        return IsDown(b, _kb, _mouse) && !IsDown(b, _prevKb, _prevMouse);
+    }
+
+    private static bool IsDown(Binding b, KeyboardState kb, MouseState mouse)
+    {
+        if (!b.IsMouse) return b.Key != Keys.None && kb.IsKeyDown(b.Key);
+
+        return b.Mouse switch
+        {
+            GameMouseButton.Left   => mouse.LeftButton == ButtonState.Pressed,
+            GameMouseButton.Right  => mouse.RightButton == ButtonState.Pressed,
+            GameMouseButton.Middle => mouse.MiddleButton == ButtonState.Pressed,
+            _ => false
+        };
+    }
+}

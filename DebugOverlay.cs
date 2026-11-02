@@ -1,38 +1,53 @@
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
-using Microsoft.Xna.Framework.Input;
 
 namespace CuboidFever;
 
+// The F3 debug text. It holds references to everything it reports on, so drawing it takes no arguments.
 public class DebugOverlay
 {
-    private bool _isVisible = false;
-    private bool _f3WasDown;
-
     private readonly SpriteFont _font;
+    private readonly SpriteBatch _sprites;
+    private readonly ActionInput _input;
+    private readonly World _world;
+    private readonly Player _player;
+    private readonly FrameRateLimiter _fps;
+    private readonly Hotbar _hotbar;
+    private readonly WindowManager _windowManager;
+    private readonly DayNightCycle _dayNight;
+    private readonly AudioManager _audio;
+    private readonly BlockInteraction _interaction;
+
+    private bool _isVisible;
     private int _frames;
     private double _lastFpsTime;
     private int _currentFps;
 
     public bool IsVisible => _isVisible;
 
-    public DebugOverlay(SpriteFont font)
+    public DebugOverlay(SpriteFont font, SpriteBatch sprites, ActionInput input, World world, Player player,
+                        FrameRateLimiter fps, Hotbar hotbar, WindowManager windowManager,
+                        DayNightCycle dayNight, AudioManager audio, BlockInteraction interaction)
     {
         _font = font;
+        _sprites = sprites;
+        _input = input;
+        _world = world;
+        _player = player;
+        _fps = fps;
+        _hotbar = hotbar;
+        _windowManager = windowManager;
+        _dayNight = dayNight;
+        _audio = audio;
+        _interaction = interaction;
     }
 
-    public void HandleInput(KeyboardState kb)
-    {
-        bool f3Down = kb.IsKeyDown(Keys.F3);
-        if (f3Down && !_f3WasDown)
-        {
-            _isVisible = !_isVisible;
-        }
-        _f3WasDown = f3Down;
-    }
-
+    // Call once per frame while playing: handles the show/hide toggle and counts frames.
     public void Update(GameTime gameTime)
     {
+        if (_input.WasPressed(GameAction.ToggleDebugOverlay))
+            _isVisible = !_isVisible;
+
         _frames++;
         if (gameTime.TotalGameTime.TotalSeconds - _lastFpsTime >= 1.0)
         {
@@ -42,50 +57,50 @@ public class DebugOverlay
         }
     }
 
-    public void Draw(SpriteBatch sprites, World world, Player player, int fpsCap, int slot, string[] hotbarNames,
-                    WindowManager windowManager, DayNightCycle dayNight, string musicName,
-                    bool hasTarget, (int x, int y, int z) target, (int x, int y, int z) targetPrev)
+    public void Draw()
     {
         if (!_isVisible || _font == null) return;
 
-        int cap = fpsCap;
+        int cap = _fps.CurrentCap;
         string fpsStr = cap == 0 ? "none" : cap.ToString();
 
         string debugText =
             $"{GameInfo.FullTitle}\n" +
-            $"Display: {windowManager.CurrentMode} ({windowManager.Width}x{windowManager.Height})\n" +
+            $"Display: {_windowManager.CurrentMode} ({_windowManager.Width}x{_windowManager.Height})\n" +
             $"FPS: {_currentFps} (cap: {fpsStr})\n" +
             $"Leaves: {ChunkMesher.LeafCullDepth} | AO: {(ChunkMesher.AmbientOcclusion ? "on" : "off")}\n" +
-            $"Time: {dayNight.TimeString} | Day: {dayNight.DayLengthSeconds:F0}s | Sky darkness: -{dayNight.SkyDarknessLevels}{(dayNight.Paused ? " | PAUSED" : "")}\n" +
-            $"Chunks: {world.VisibleChunks}/{world.TotalChunks} | Queue: {world.PendingWork}\n" +
-            $"XYZ: {player.Position.X:F2} / {player.Position.Y:F2} / {player.Position.Z:F2}\n" +
-            $"Holding: {hotbarNames[slot]} | Music: {musicName}\n\n" +
-            HighlightedBlockText(world, hasTarget, target, targetPrev);
+            $"Time: {_dayNight.TimeString} | Day: {_dayNight.DayLengthSeconds:F0}s | Sky darkness: -{_dayNight.SkyDarknessLevels}{(_dayNight.Paused ? " | PAUSED" : "")}\n" +
+            $"Chunks: {_world.VisibleChunks}/{_world.TotalChunks} | Queue: {_world.PendingWork}\n" +
+            $"XYZ: {_player.Position.X:F2} / {_player.Position.Y:F2} / {_player.Position.Z:F2}\n" +
+            $"Holding: {_hotbar.SelectedName} | Music: {_audio.CurrentSongName}\n\n" +
+            HighlightedBlockText();
 
-        sprites.Begin(samplerState: SamplerState.PointClamp);
-        sprites.DrawString(_font, debugText, new Vector2(11, 11), Color.Black);
-        sprites.DrawString(_font, debugText, new Vector2(10, 10), Color.White);
-        sprites.End();
+        _sprites.Begin(samplerState: SamplerState.PointClamp);
+        _sprites.DrawString(_font, debugText, new Vector2(11, 11), Color.Black);
+        _sprites.DrawString(_font, debugText, new Vector2(10, 10), Color.White);
+        _sprites.End();
     }
 
-    private static string HighlightedBlockText(World world, bool hasTarget,
-                                        (int x, int y, int z) target, (int x, int y, int z) front)
+    private string HighlightedBlockText()
     {
-        if (!hasTarget) return "Highlighted: none";
+        if (!_interaction.HasTarget) return "Highlighted: none";
 
-        byte id = world.GetBlock(target.x, target.y, target.z);
+        var target = _interaction.Target;
+        var front = _interaction.TargetPrev;
+
+        byte id = _world.GetBlock(target.x, target.y, target.z);
         string name = BlockRegistry.Instance.GetName(id);
         name = name.Substring(name.IndexOf(':') + 1).Replace('_', ' ');
 
         return
             $"Highlighted: {name} @ {target.x} {target.y} {target.z}\n" +
-            $"  Light in front ({front.x} {front.y} {front.z}): {LightString(world, front)}\n" +
-            $"  Light in block: {LightString(world, target)}";
+            $"  Light in front ({front.x} {front.y} {front.z}): {LightString(front)}\n" +
+            $"  Light in block: {LightString(target)}";
     }
-    
-    private static string LightString(World world, (int x, int y, int z) p)
+
+    private string LightString((int x, int y, int z) p)
     {
-        var light = world.Light;
+        var light = _world.Light;
         return $"Sky {light.Get(0, p.x, p.y, p.z)} -> {light.GetSkyNow(p.x, p.y, p.z)} | " +
             $"R {light.Get(1, p.x, p.y, p.z)} | G {light.Get(2, p.x, p.y, p.z)} | B {light.Get(3, p.x, p.y, p.z)} | " +
             $"Total {light.GetCombined(p.x, p.y, p.z)}";

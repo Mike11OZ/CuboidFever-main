@@ -1,7 +1,4 @@
 ﻿using System;
-using System.IO;
-using System.Linq;
-using System.Runtime.InteropServices;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
@@ -10,110 +7,53 @@ namespace CuboidFever;
 
 public class Game1 : Game
 {
-    // Import the Windows function that creates a console window
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool AllocConsole();
-
-    // ---- Configuration ----
-    private const float ReachDistance = 5f; // Easy to tweak here!
-    
     // ---- Core ----
-    private StartupScreen _startupScreen = new();
     private GraphicsDeviceManager _graphics;
-    private BasicEffect _effect = null!;
-    private BasicEffect _lineEffect = null!;
-    private Effect _waterEffect = null!;
-    private Texture2D _atlas = null!;
     private ParticleSystem _particleSystem = new();
     private World _world = null!;
-    private Effect _solidEffect = null!;
-    private bool _spawned;
-    private float _splashTimer = 0f; // Tracks elapsed time on startup
-    private bool _lWasDown;
-    private bool _oWasDown;
-    private bool _vWasDown;
-    private byte _airId;
+    private SpawnSequence _spawn = null!;
     private WindowManager _windowManager = null!;
-    private bool _f11WasDown; // For edge-triggered hotkey check
     private DebugOverlay _debugOverlay = null!;
     private readonly DayNightCycle _dayNight = new();
-    private bool _pWasDown;
-    private const float TimeScrubHoursPerSecond = 3f; // hold , or . to scrub the clock
-    
+    private Hotkeys _hotkeys = null!;
+    private readonly FrameRateLimiter _fps;
+    private readonly ActionInput _input = new(new KeyBindings());
+
     // ---- Audio ----
-    private AudioManager _audioManager = new();
+    private AudioManager _audioManager = null!;
     private const float SongLoopDelay = 4.0f; // Configurable delay between loops
 
     // ---- Camera ----
     private Player _player = new();
-    private Vector3 _camPos;
-    private Vector3 _forward;
-    private float _yaw, _pitch;
+    private PlayerController _controller = null!;
 
     // ---- Block interaction ----
-    private MouseState _prevMouse;
-    private bool _hasTarget;
-    private (int x, int y, int z) _target, _targetPrev;
-    private byte[] _hotbar = null!;
-    private string[] _hotbarNames = null!;
-    private int _slot = 2;
+    private Hotbar _hotbar = null!;
+    private BlockInteraction _blockInteraction = null!;
 
-    // ---- HUD ----
-    private SpriteBatch _sprites = null!;
-    private Texture2D _pixel = null!;
-
-    // ---- FPS counter and cap ----
-    private int _frames;
-    private double _lastFpsTime;
-    private readonly int[] _fpsCaps = { 30, 60, 120, 0 }; // 0 = uncapped
-    private int _capIndex = 1;                            // 0=30, 1=60, 2=120, 3=uncapped
-    private bool _fWasDown;
+    // ---- Rendering ----
+    private WorldRenderer _renderer = null!;
+    private Hud _hud = null!;
+    private SpriteBatch _sprites = null!; // still shared with StartupScreen and DebugOverlay
 
     public Game1()
     {
-        // Spawns a background console window for this process
-        AllocConsole();
-        Console.SetOut(new StreamWriter(Console.OpenStandardOutput()) { AutoFlush = true });
-
-        // This bridges Debug.WriteLine over to the standard output stream
-        System.Diagnostics.Trace.Listeners.Add(new System.Diagnostics.ConsoleTraceListener());
-
-        Console.WriteLine("Console window initialized! Debug output is live.");
+        DebugConsole.Init();
         Console.WriteLine($"Initializing {GameInfo.FullTitle}...");
 
         _graphics = new GraphicsDeviceManager(this);
         Content.RootDirectory = "Content";
         IsMouseVisible = false;
         _graphics.SynchronizeWithVerticalRetrace = false;
-        ApplyFpsCap();
+        _fps = new FrameRateLimiter(this);
+        _fps.Apply();
     }
 
     protected override void LoadContent()
     {
-        string dataRoot = Path.Combine(
-            AppContext.BaseDirectory,
-            "data",
-            "cuboidfever");
+        TextureAtlas.Initialize(GraphicsDevice, GamePaths.BlockTextureRoot, GamePaths.TextureAtlasConfig);
 
-        string textureRoot = Path.Combine(
-            AppContext.BaseDirectory,
-            "assets",
-            "cuboidfever",
-            "textures",
-            "block");
-
-        string atlasConfigPath = Path.Combine(
-            dataRoot,
-            "texture_atlas.json");
-
-        TextureAtlas.Initialize(
-            GraphicsDevice,
-            textureRoot,
-            atlasConfigPath);
-
-        _startupScreen.LoadContent(GraphicsDevice);
-
-        _atlas = TextureAtlas.Instance.Texture;
+        var atlas = TextureAtlas.Instance.Texture;
 
         _particleSystem.Init(TextureAtlas.Instance);
 
@@ -132,78 +72,48 @@ public class Game1 : Game
         {
             Console.WriteLine($"[Warning] DebugFont.xnb not found. On-screen debug overlay disabled. ({ex.Message})");
         }
-        _debugOverlay = new DebugOverlay(debugFont);
-
-        _effect = new BasicEffect(GraphicsDevice)
-        {
-            VertexColorEnabled = true,
-            TextureEnabled = true,
-            Texture = _atlas,
-            Projection = Matrix.CreatePerspectiveFieldOfView(
-                MathHelper.ToRadians(70f),
-                GraphicsDevice.Viewport.AspectRatio,
-                0.1f,
-                500f)
-        };
-
-        _lineEffect = new BasicEffect(GraphicsDevice)
-        {
-            VertexColorEnabled = true
-        };
 
         _sprites = new SpriteBatch(GraphicsDevice);
-        _pixel = new Texture2D(GraphicsDevice, 1, 1);
-        _pixel.SetData(new[] { Color.White });
 
-        BlockRegistry.Initialize(dataRoot);
+        BlockRegistry.Initialize(GamePaths.DataRoot);
         InputManager.Initialize();
-        _dayNight.LoadSettings(Path.Combine(dataRoot, "daynight.json"));
+        _dayNight.LoadSettings(GamePaths.DayNightConfig);
         _dayNight.Reset();
 
         var blocks = BlockRegistry.Instance;
 
-        _airId = blocks.GetId("cuboidfever:air");
-
-        _hotbar = blocks.HotbarIds;
-
-        _hotbarNames = _hotbar
-            .Select(id => blocks.GetName(id)
-                .Split(':').Last()
-                .Replace('_', ' '))
-            .ToArray();
+        _hotbar = new Hotbar(blocks, _input);
+        _hud = new Hud(GraphicsDevice, _sprites, atlas, _hotbar);
 
         _world = new World(8374173);
-        _camPos = new Vector3(128.5f, 100f, 128.5f); // looking-from point while the first columns load
+        _hotkeys = new Hotkeys(_world, _dayNight, _windowManager, _fps, _input);
+        _controller = new PlayerController(_player, _world, _input);
+        _blockInteraction = new BlockInteraction(_world, _player, _controller, _hotbar, _input, _particleSystem, _dayNight);
 
-        _solidEffect = Content.Load<Effect>("SolidShader");
-        _waterEffect = Content.Load<Effect>("WaterShader");
+        _spawn = new SpawnSequence(_world, _controller);
+        _spawn.LoadContent(GraphicsDevice);
+        _spawn.Spawned += OnSpawned;
+
+        var solidShader = Content.Load<Effect>("SolidShader");
+        var waterShader = Content.Load<Effect>("WaterShader");
+        _renderer = new WorldRenderer(GraphicsDevice, solidShader, waterShader, atlas,
+                                      _world, _controller, _blockInteraction, _particleSystem, _dayNight);
 
         // ---- Initialize Audio Handler ----
         _audioManager = new AudioManager();
         _audioManager.Volume = 0.8f;
         // Do not play immediately; wait for spawn
+
+        // Built last because it reads from almost everything above
+        _debugOverlay = new DebugOverlay(debugFont, _sprites, _input, _world, _player, _fps, _hotbar,
+                                         _windowManager, _dayNight, _audioManager, _blockInteraction);
     }
 
-    private void TrySpawn(float dt)
+    // Runs once, right after the player is placed in the world and gameplay begins.
+    private void OnSpawned()
     {
-        _splashTimer += dt;
-
-        // Keep showing the splash screen until at least 3 seconds have passed
-        if (_splashTimer < 2.0f) return;
-
-        int sx = 128, sz = 128;
-        // Also ensure the initial spawn column is fully generated
-        if (!_world.IsColumnLoaded(sx, sz)) return;
-
-        int sy = World.Height - 1;
-        while (sy > 0 && !_world.IsSolid(sx, sy, sz)) sy--;
-        _player.Position = new Vector3(sx + 0.5f, sy + 1.01f, sz + 0.5f);
-        _camPos = _player.Eye;
         Mouse.SetPosition(Window.ClientBounds.Width / 2, Window.ClientBounds.Height / 2);
-        
-        // This triggers the transition from splash screen to gameplay!
-        _spawned = true; 
-        
+
         // Kick off the initial random delay timer (1 to 5 minutes) upon spawning
         _audioManager.StartPlaylist();
     }
@@ -217,153 +127,35 @@ public class Game1 : Game
 
         var kb = Keyboard.GetState();
         var mouse = Mouse.GetState();
-        
-        if (Keyboard.GetState().IsKeyDown(Keys.Escape))
-        {
-            this.Exit();
-        }
+        _input.Update(kb, mouse);
+
+        if (_input.WasPressed(GameAction.Quit)) Exit();
 
         // Tick the audio handler every frame
         _audioManager.Update(gameTime);
 
-        if (!_spawned)
+        if (!_spawn.HasSpawned)
         {
-            _forward = Vector3.Forward;
-            _world.Update(GraphicsDevice, _camPos, totalTime);
-            
-            // Pass delta time into TrySpawn to tick our 3-second splash timer
-            TrySpawn(dt);
+            _world.Update(GraphicsDevice, _controller.CamPos, totalTime);
+            _spawn.Update(dt);
 
-            _effect.View = Matrix.CreateLookAt(_camPos, _camPos + _forward, Vector3.Up);
             base.Update(gameTime);
             return;
         }
-        HandleWindowModeHotkey(kb);
-        _debugOverlay.HandleInput(kb);
+        _hotkeys.Update(dt);
         _debugOverlay.Update(gameTime);
-        HandleFpsHotkey(kb);
-        HandleLeafHotkey(kb);
-        HandleAoHotkey(kb);
-        HandleTimeHotkeys(kb, dt);
         _dayNight.Update(dt);
         _world.SkyDarkness = _dayNight.SkyDarknessLevels;
-        UpdateCamera(kb, dt);
-        HandleBlockSelection(kb, mouse);
-        HandleBlockInteraction(mouse);
+        _controller.Update(dt, IsActive);
+        _hotbar.Update();
+        _blockInteraction.Update(IsActive);
         _particleSystem.Update(dt, _world);
-        _prevMouse = mouse;
 
-        _world.Update(GraphicsDevice, _camPos, totalTime);
-        _effect.View = Matrix.CreateLookAt(_camPos, _camPos + _forward, Vector3.Up);
+        _world.Update(GraphicsDevice, _controller.CamPos, totalTime);
         base.Update(gameTime);
     }
 
-    private void OnClientSizeChanged(object sender, EventArgs e)
-    {
-        if (GraphicsDevice.Viewport.Width > 0 && GraphicsDevice.Viewport.Height > 0)
-        {
-            var newProjection = Matrix.CreatePerspectiveFieldOfView(
-                MathHelper.ToRadians(70f),
-                GraphicsDevice.Viewport.AspectRatio,
-                0.1f,
-                500f);
-
-            if (_effect != null) _effect.Projection = newProjection;
-        }
-    }
-
-    private void HandleFpsHotkey(KeyboardState kb)
-    {
-        bool fDown = kb.IsKeyDown(Keys.F);
-        if (fDown && !_fWasDown)
-        {
-            _capIndex = (_capIndex + 1) % _fpsCaps.Length;
-            ApplyFpsCap();
-        }
-        _fWasDown = fDown;
-    }
-
-    private void UpdateCamera(KeyboardState kb, float dt)
-    {
-        if (IsActive)
-        {
-            InputManager.GetMouseDelta(out int dx, out int dy);
-
-            if (dx != 0 || dy != 0)
-            {
-                _yaw   -= dx * 0.003f;
-                _pitch -= dy * 0.003f;
-                _pitch = MathHelper.Clamp(_pitch, -1.5f, 1.5f);
-            }
-        }
-
-        var rotation = Matrix.CreateFromYawPitchRoll(_yaw, _pitch, 0);
-        _forward = Vector3.Transform(Vector3.Forward, rotation);
-        Vector3 right = Vector3.Transform(Vector3.Right, rotation);
-
-        bool vDown = kb.IsKeyDown(Keys.V);
-        if (vDown && !_vWasDown) _player.Flying = !_player.Flying;
-        _vWasDown = vDown;
-
-        Vector3 fwd = _forward, rgt = right;
-        if (!_player.Flying)
-        {
-            fwd = new Vector3(_forward.X, 0, _forward.Z);
-            if (fwd != Vector3.Zero) fwd.Normalize();
-            rgt = new Vector3(right.X, 0, right.Z);
-            if (rgt != Vector3.Zero) rgt.Normalize();
-        }
-
-        Vector3 wish = Vector3.Zero;
-        if (kb.IsKeyDown(Keys.W)) wish += fwd;
-        if (kb.IsKeyDown(Keys.S)) wish -= fwd;
-        if (kb.IsKeyDown(Keys.D)) wish += rgt;
-        if (kb.IsKeyDown(Keys.A)) wish -= rgt;
-
-        float vertical = (kb.IsKeyDown(Keys.Space) ? 1f : 0f) - (kb.IsKeyDown(Keys.LeftShift) ? 1f : 0f);
-        bool groundLoaded = _world.IsColumnLoaded((int)MathF.Floor(_player.Position.X),
-                                                    (int)MathF.Floor(_player.Position.Z));
-        if (_player.Flying || groundLoaded)
-            _player.Update(_world, dt, wish, kb.IsKeyDown(Keys.Space), vertical);
-
-        if (_player.Position.Y < -20) _player.Position = new Vector3(128.5f, 120f, 128.5f);
-
-        _camPos = _player.Eye;
-    }
-
-    private void HandleBlockSelection(KeyboardState kb, MouseState mouse)
-    {
-        for (int i = 0; i < Math.Min(9, _hotbar.Length); i++)
-            if (kb.IsKeyDown(Keys.D1 + i)) _slot = i;
-
-        int scroll = mouse.ScrollWheelValue - _prevMouse.ScrollWheelValue;
-        if (scroll != 0)
-            _slot = ((_slot - Math.Sign(scroll)) % _hotbar.Length + _hotbar.Length) % _hotbar.Length;
-    }
-
-    private void HandleBlockInteraction(MouseState mouse)
-    {
-        _hasTarget = _world.Raycast(_camPos, _forward, ReachDistance, out _target, out _targetPrev);
-        if (!IsActive || !_hasTarget) return;
-
-        bool leftClick  = mouse.LeftButton == ButtonState.Pressed && _prevMouse.LeftButton == ButtonState.Released;
-        bool rightClick = mouse.RightButton == ButtonState.Pressed && _prevMouse.RightButton == ButtonState.Released;
-
-        if (leftClick)
-        {
-            byte targetBlock = _world.GetBlock(_target.x, _target.y, _target.z);
-            if (targetBlock != _airId)
-            {
-                _world.SetBlock(_target.x, _target.y, _target.z, _airId);
-                _particleSystem.SpawnBurst(_world, _target.x, _target.y, _target.z, targetBlock, _dayNight.SkyBrightness);
-            }
-        }
-        if (rightClick && _targetPrev != _target)
-        {
-            if (!_player.Overlaps(_targetPrev.x, _targetPrev.y, _targetPrev.z))
-                _world.SetBlock(_targetPrev.x, _targetPrev.y, _targetPrev.z, _hotbar[_slot]);
-        }
-    }
+    private void OnClientSizeChanged(object sender, EventArgs e) => _renderer?.OnResize();
 
     // =====================  DRAW  =====================
 
@@ -372,170 +164,17 @@ public class Game1 : Game
         float totalTime = (float)gameTime.TotalGameTime.TotalSeconds;
 
         // If the player hasn't spawned yet, render the startup screen instead of the world
-        if (!_spawned)
+        if (!_spawn.HasSpawned)
         {
-            _startupScreen.Draw(_sprites, GraphicsDevice);
+            _spawn.DrawSplash(_sprites, GraphicsDevice);
             base.Draw(gameTime);
             return;
         }
 
-        var frustum = new BoundingFrustum(_effect.View * _effect.Projection);
-        _world.UpdateVisibility(frustum, _camPos, totalTime);
-        GraphicsDevice.Clear(_dayNight.SkyColor);
-        GraphicsDevice.SamplerStates[0] = SamplerState.PointClamp;
-
-        DrawWorld(frustum, totalTime);
-        DrawHud();
-
-        // Inside Game1.Draw():
-        _debugOverlay.Draw(_sprites, _world, _player, _fpsCaps[_capIndex], _slot, _hotbarNames, _windowManager, _dayNight, _audioManager.CurrentSongName,
-                _hasTarget, _target, _targetPrev);
+        _renderer.Draw(totalTime);
+        _hud.Draw();
+        _debugOverlay.Draw();
 
         base.Draw(gameTime);
-    }
-
-    private void DrawWorld(BoundingFrustum frustum, float totalTime)
-    {
-        GraphicsDevice.BlendState = BlendState.Opaque;
-        GraphicsDevice.DepthStencilState = DepthStencilState.Default;
-        GraphicsDevice.RasterizerState = RasterizerState.CullCounterClockwise;
-        _solidEffect.Parameters["WorldViewProjection"]?.SetValue(_effect.View * _effect.Projection);
-        _solidEffect.Parameters["SpriteTexture"]?.SetValue(_atlas);
-        _solidEffect.Parameters["SkyBrightness"]?.SetValue(_dayNight.SkyBrightness);
-        foreach (var pass in _solidEffect.CurrentTechnique.Passes)
-        {
-            pass.Apply();
-            _world.DrawSolid(GraphicsDevice);
-        }
-        if (_hasTarget) DrawTargetOutline();
-
-        var rotation = Matrix.CreateFromYawPitchRoll(_yaw, _pitch, 0);
-        Vector3 camRight = Vector3.Transform(Vector3.Right, rotation);
-        Vector3 camUp = Vector3.Transform(Vector3.Up, rotation);
-        
-        _particleSystem.Draw(GraphicsDevice, _effect, frustum, camRight, camUp);
-
-        GraphicsDevice.BlendState = BlendState.AlphaBlend;
-        GraphicsDevice.DepthStencilState = DepthStencilState.DepthRead; // Disables depth writes so water layers don't clip each other
-        GraphicsDevice.RasterizerState = RasterizerState.CullNone;
-        WaterWaves.Apply(_waterEffect, _effect.View * _effect.Projection, _camPos, _atlas, totalTime);
-        _waterEffect.Parameters["SkyBrightness"]?.SetValue(_dayNight.SkyBrightness);
-        foreach (var pass in _waterEffect.CurrentTechnique.Passes)
-        {
-            pass.Apply();
-            _world.DrawWater(GraphicsDevice);
-        }
-    }
-
-    private void DrawHud()
-    {
-        _sprites.Begin(samplerState: SamplerState.PointClamp);
-
-        int cx = GraphicsDevice.Viewport.Width / 2, cy = GraphicsDevice.Viewport.Height / 2;
-        _sprites.Draw(_pixel, new Rectangle(cx - 8, cy - 1, 16, 2), Color.White);
-        _sprites.Draw(_pixel, new Rectangle(cx - 1, cy - 8, 2, 16), Color.White);
-
-        const int size = 64, pad = 16, border = 4;
-        var region = BlockRegistry.Instance.GetTextureRegion(_hotbar[_slot], 0);
-        var src = region.PixelBounds;
-        var dest = new Rectangle(pad, GraphicsDevice.Viewport.Height - pad - size, size, size);
-
-        _sprites.Draw(_pixel, new Rectangle(dest.X - border, dest.Y - border, size + border * 2, size + border * 2), Color.Black * 0.6f);
-        _sprites.Draw(_atlas, dest, src, BlockRegistry.Instance.GetTint(_hotbar[_slot]));
-
-        _sprites.End();
-    }
-
-    private void DrawTargetOutline()
-    {
-        var min = new Vector3(_target.x, _target.y, _target.z) - new Vector3(0.002f);
-        var max = min + new Vector3(1.004f);
-
-        var p = new Vector3[8];
-        for (int i = 0; i < 8; i++)
-            p[i] = new Vector3((i & 1) == 0 ? min.X : max.X,
-                               (i & 2) == 0 ? min.Y : max.Y,
-                               (i & 4) == 0 ? min.Z : max.Z);
-
-        int[] edges = { 0,1, 2,3, 4,5, 6,7,   0,2, 1,3, 4,6, 5,7,   0,4, 1,5, 2,6, 3,7 };
-        var v = new VertexPositionColor[24];
-        for (int i = 0; i < 24; i++) v[i] = new VertexPositionColor(p[edges[i]], Color.Black);
-
-        _lineEffect.View = _effect.View;
-        _lineEffect.Projection = _effect.Projection;
-        foreach (var pass in _lineEffect.CurrentTechnique.Passes)
-        {
-            pass.Apply();
-            GraphicsDevice.DrawUserPrimitives(PrimitiveType.LineList, v, 0, 12);
-        }
-    }
-
-    private void UpdateTitle(GameTime gameTime)
-    {
-        _frames++;
-        if (gameTime.TotalGameTime.TotalSeconds - _lastFpsTime < 1.0) return;
-
-        int cap = _fpsCaps[_capIndex];
-        Window.Title = $"CuboidFever | {_frames} FPS (cap: {(cap == 0 ? "none" : cap)}) | " +
-               $"chunks {_world.VisibleChunks}/{_world.TotalChunks} | queue {_world.PendingWork} | holding: {_hotbarNames[_slot]} | leaves {ChunkMesher.LeafCullDepth} | AO {(ChunkMesher.AmbientOcclusion ? "on" : "off")}";
-        _frames = 0;
-        _lastFpsTime = gameTime.TotalGameTime.TotalSeconds;
-    }
-
-    private void ApplyFpsCap()
-    {
-        int cap = _fpsCaps[_capIndex];
-        if (cap == 0)
-        {
-            IsFixedTimeStep = false;
-        }
-        else
-        {
-            IsFixedTimeStep = true;
-            TargetElapsedTime = TimeSpan.FromSeconds(1.0 / cap);
-        }
-    }
-
-    private void HandleWindowModeHotkey(KeyboardState kb)
-    {
-        bool f11Down = kb.IsKeyDown(Keys.F11);
-        if (f11Down && !_f11WasDown)
-        {
-            _windowManager.CycleNextMode();
-        }
-        _f11WasDown = f11Down;
-    }
-
-    private void HandleLeafHotkey(KeyboardState kb)
-    {
-        bool down = kb.IsKeyDown(Keys.L);
-        if (down && !_lWasDown)
-        {
-            ChunkMesher.LeafCullDepth = (ChunkMesher.LeafCullDepth + 1) % (ChunkMesher.MaxLeafDepth + 1);
-            _world.RemeshAll();
-        }
-        _lWasDown = down;
-    }
-
-    // P pauses the clock; hold , to scrub backwards or . to scrub forwards.
-    private void HandleTimeHotkeys(KeyboardState kb, float dt)
-    {
-        bool pDown = kb.IsKeyDown(Keys.P);
-        if (pDown && !_pWasDown) _dayNight.Paused = !_dayNight.Paused;
-        _pWasDown = pDown;
-
-        if (kb.IsKeyDown(Keys.OemPeriod)) _dayNight.Scrub(TimeScrubHoursPerSecond * dt);
-        if (kb.IsKeyDown(Keys.OemComma)) _dayNight.Scrub(-TimeScrubHoursPerSecond * dt);
-    }
-
-    private void HandleAoHotkey(KeyboardState kb)
-    {
-        bool down = kb.IsKeyDown(Keys.O);
-        if (down && !_oWasDown)
-        {
-            ChunkMesher.AmbientOcclusion = !ChunkMesher.AmbientOcclusion;
-            _world.RemeshAll();
-        }
-        _oWasDown = down;
     }
 }
