@@ -181,7 +181,7 @@ public class Game1 : Game
         // ---- Initialize Audio Handler ----
         _audioManager = new AudioManager();
         _audioManager.Volume = 0.8f;
-        _audioManager.PlayMusic("cuboid", SongLoopDelay);
+        // Do not play immediately; wait for spawn
     }
 
     private void TrySpawn(float dt)
@@ -189,7 +189,7 @@ public class Game1 : Game
         _splashTimer += dt;
 
         // Keep showing the splash screen until at least 3 seconds have passed
-        if (_splashTimer < 3.0f) return;
+        if (_splashTimer < 2.0f) return;
 
         int sx = 128, sz = 128;
         // Also ensure the initial spawn column is fully generated
@@ -203,6 +203,9 @@ public class Game1 : Game
         
         // This triggers the transition from splash screen to gameplay!
         _spawned = true; 
+        
+        // Kick off the initial random delay timer (1 to 5 minutes) upon spawning
+        _audioManager.StartPlaylist();
     }
 
     // =====================  UPDATE  =====================
