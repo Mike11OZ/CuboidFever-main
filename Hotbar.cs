@@ -1,0 +1,42 @@
+using System;
+using System.Linq;
+
+namespace CuboidFever;
+
+// The row of placeable blocks and which slot is selected.
+public sealed class Hotbar
+{
+    private readonly byte[] _ids;
+    private readonly string[] _names;
+    private readonly ActionInput _input;
+
+    public Hotbar(BlockRegistry blocks, ActionInput input)
+    {
+        _input = input;
+        _ids = blocks.HotbarIds;
+        _names = _ids
+            .Select(id => blocks.GetName(id)
+                .Split(':').Last()
+                .Replace('_', ' '))
+            .ToArray();
+
+        Slot = Math.Min(2, _ids.Length - 1); // start on the third block, as before
+    }
+
+    public int Slot { get; private set; }
+    public int Count => _ids.Length;
+    public byte SelectedId => _ids[Slot];
+    public string SelectedName => _names[Slot];
+
+    // Number keys jump to a slot, the mouse wheel scrolls through them.
+    public void Update()
+    {
+        // GameAction.Hotbar1..Hotbar9 are declared in order, so they can be offset from Hotbar1
+        for (int i = 0; i < Math.Min(9, _ids.Length); i++)
+            if (_input.WasPressed(GameAction.Hotbar1 + i)) Slot = i;
+
+        int scroll = _input.ScrollDelta;
+        if (scroll != 0)
+            Slot = ((Slot - Math.Sign(scroll)) % _ids.Length + _ids.Length) % _ids.Length;
+    }
+}
