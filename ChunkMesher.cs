@@ -83,7 +83,6 @@ public static class ChunkMesher
     private static readonly Vector2[] FaceUV = { new(0, 1), new(0, 0), new(1, 0), new(1, 1) };
     private static readonly Vector2[] BottomUV = { new(0, 0), new(0, 1), new(1, 1), new(1, 0) };
     private static readonly float[] FaceShade = { 0.8f, 0.8f, 1.0f, 0.5f, 0.65f, 0.65f };
-    private const float WaterSurfaceInset = 0.125f;
 
     private static readonly int[] ColOff = new int[P];
     private static readonly int[] LocalOf = new int[P];
@@ -106,13 +105,16 @@ public static class ChunkMesher
 
         public void Clear() { V.Clear(); I.Clear(); F.Clear(); W.Clear(); }
 
-        public void AddFace(int f, Vector3 pos, Color color, Color skyColor, TextureRegion region, float[] ao, float[] waveWeights, bool isWater)
+        // topY = height of the block's top edge (1 = full block). Water uses WaterSurface.SurfaceHeight when open to
+        // the air above. The face index (F) and wave weight (W) streams are kept for the water vertex format;
+        // waves are off for now, so the weight is always 0.
+        public void AddFace(int f, Vector3 pos, Color color, Color skyColor, TextureRegion region, float[] ao, float topY)
         {
             int start = V.Count;
             for (int c = 0; c < 4; c++)
             {
                 F.Add((byte)f);
-                W.Add(waveWeights[c]);
+                W.Add(0f);
             }
 
             float insetU = BlockRegistry.Instance.InsetU;
@@ -132,11 +134,9 @@ public static class ChunkMesher
 
                 float k = ao[c];
                 Vector3 vertexPos = FaceCorners[f][c] + pos;
+                if (FaceCorners[f][c].Y > 0.5f) vertexPos.Y = pos.Y + topY;
 
-                if (isWater && f != 3 && FaceCorners[f][c].Y > 0.5f)
-                    vertexPos.Y -= WaterSurfaceInset;
-
-                   V.Add(new VertexPositionColorTextureSky(
+                V.Add(new VertexPositionColorTextureSky(
                         vertexPos,
                         new Color(r * k, g * k, b * k, a),
                         uv,
@@ -193,32 +193,19 @@ public static class ChunkMesher
         return false;
     }
 
-    private static float ShoreWaveWeight(byte[] blocks, BlockInfo[] info, int cell, Vector3 corner)
+    // Minecraft's rule for which water faces exist (BlockFluids.shouldSideBeRendered): never against more water,
+    // the top always, and the sides / bottom only where the neighbour is not an opaque cube.
+    private static bool WaterFaceVisible(int f, in BlockInfo nb) =>
+        !nb.IsWater && (f == 2 || !nb.Occludes);
+
+    // Picks the better lit of two cells (summed over sky + the three block light channels).
+    // Water faces that border air are lit from whichever side is brighter, so a face looking into
+    // a dim air pocket (or from a dim pocket into bright water) can't come out nearly black.
+    private static int BrighterCell(byte[][] light, int waterCell, int airCell)
     {
-        int dx = corner.X < 0.5f ? -1 : 1;
-        int dz = corner.Z < 0.5f ? -P : P;
-        int xNeighbor = cell + dx;
-        int zNeighbor = cell + dz;
-        int diagonal = cell + dx + dz;
-
-        if (info[blocks[cell + PP]].Occludes)
-            return 2f;
-
-        bool touchesSolidAtWaterLevel = 
-            info[blocks[cell]].Occludes || 
-            info[blocks[xNeighbor]].Occludes || 
-            info[blocks[zNeighbor]].Occludes || 
-            info[blocks[diagonal]].Occludes;
-
-        bool touchesWallAtYPlus1 = 
-            info[blocks[xNeighbor + PP]].Occludes || 
-            info[blocks[zNeighbor + PP]].Occludes || 
-            info[blocks[diagonal + PP]].Occludes;
-
-        if (touchesSolidAtWaterLevel || touchesWallAtYPlus1)
-            return 0f;
-
-        return 1f;
+        int w = light[0][waterCell] + light[1][waterCell] + light[2][waterCell] + light[3][waterCell];
+        int a = light[0][airCell] + light[1][airCell] + light[2][airCell] + light[3][airCell];
+        return w > a ? waterCell : airCell;
     }
 
     public static MeshData Build(Chunk chunk, Column[] cols, int version)
@@ -236,7 +223,6 @@ public static class ChunkMesher
         var registry = BlockRegistry.Instance;
         var info = registry.Info;
         var ao = new float[4];
-        var waveWeights = new float[4];
 
         for (int y = 0; y < Chunk.Size; y++)
         for (int z = 0; z < Chunk.Size; z++)
@@ -255,8 +241,8 @@ public static class ChunkMesher
                 int n = i + Offsets[f];
                 byte nbId = b.Blocks[n];
 
-                bool draw = self.IsWater && f == 2 && info[nbId].Occludes
-                    ? true
+                bool draw = self.IsWater
+                    ? WaterFaceVisible(f, in info[nbId])
                     : self.IsLeaves && info[nbId].IsLeaves
                         ? LeafFaceVisible(b.Blocks, info, n, Offsets[f])
                         : ShouldDrawFace(in self, in info[nbId]);
@@ -270,26 +256,19 @@ public static class ChunkMesher
                     faceAo = ao;
                 }
 
-                if (self.IsWater)
-                {
-                    for (int v = 0; v < 4; v++)
-                    {
-                        Vector3 corner = FaceCorners[f][v];
-                        bool followsSurface = f == 2 || (f != 3 && corner.Y > 0.5f);
-                        waveWeights[v] = followsSurface
-                            ? ShoreWaveWeight(b.Blocks, info, i, corner)
-                            : 0f;
-                    }
-                }
-                else
-                {
-                    Array.Clear(waveWeights, 0, waveWeights.Length);
-                }
+                // Water sits 1/9 below the top of its block, unless more water is on top (then it is a full block).
+                float topY = self.IsWater && !info[b.Blocks[i + PP]].IsWater
+                    ? WaterSurface.SurfaceHeight
+                    : 1f;
 
-                int lightSample = self.IsWater && f == 2 && info[nbId].Occludes ? i : n;
+                // Water under a solid block is lit from its own cell; every other water face (surface, or a wall /
+                // ceiling facing air) from the brighter of the water cell and the cell it looks into.
+                int lightSample = !self.IsWater ? n
+                    : f == 2 && info[nbId].Occludes ? i
+                    : BrighterCell(b.Light, i, n);
                 LightColors(in self, f, lightSample, b.Light, out var color, out var skyColor);
 
-                builder.AddFace(f, pos, color, skyColor, registry.FastRegion(id, f), faceAo, waveWeights, self.IsWater);
+                builder.AddFace(f, pos, color, skyColor, registry.FastRegion(id, f), faceAo, topY);
             }
         }
 

@@ -33,6 +33,7 @@ public class Game1 : Game
 
     // ---- Rendering ----
     private WorldRenderer _renderer = null!;
+    private ScreenEffectManager _screenEffects = null!; // full-screen effects: underwater tint, later damage flash, etc.
     private Hud _hud = null!;
     private SpriteBatch _sprites = null!; // still shared with StartupScreen and DebugOverlay
 
@@ -99,6 +100,9 @@ public class Game1 : Game
         _renderer = new WorldRenderer(GraphicsDevice, solidShader, waterShader, atlas,
                                       _world, _controller, _blockInteraction, _particleSystem, _dayNight);
 
+        _screenEffects = new ScreenEffectManager(GraphicsDevice, _sprites);
+        _screenEffects.Add(new UnderwaterTint());
+
         // ---- Initialize Audio Handler ----
         _audioManager = new AudioManager();
         _audioManager.Volume = 0.8f;
@@ -147,6 +151,7 @@ public class Game1 : Game
         _dayNight.Update(dt);
         _world.SkyDarkness = _dayNight.SkyDarknessLevels;
         _controller.Update(dt, IsActive);
+        _screenEffects.Update(dt, new ScreenEffectContext(_world, _controller.CamPos, totalTime));
         _hotbar.Update();
         _blockInteraction.Update(IsActive);
         _particleSystem.Update(dt, _world);
@@ -172,6 +177,7 @@ public class Game1 : Game
         }
 
         _renderer.Draw(totalTime);
+        _screenEffects.Draw(); // after the world, before the HUD so the crosshair and hotbar stay untinted
         _hud.Draw();
         _debugOverlay.Draw();
 

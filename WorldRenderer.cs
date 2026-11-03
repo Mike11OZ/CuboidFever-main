@@ -94,19 +94,34 @@ public sealed class WorldRenderer
 
     private void DrawWater(Matrix viewProjection, float totalTime)
     {
-        _gd.BlendState = BlendState.AlphaBlend;
-        _gd.DepthStencilState = DepthStencilState.DepthRead; // No depth writes, so water layers don't clip each other
+        // Water is drawn the way Minecraft does on Fancy graphics: faces are visible from both sides, and a depth-only
+        // pass runs first so that only the NEAREST water surface at each pixel is blended. Without it, every water
+        // face behind it (the back of an air pocket, the surface seen through a wall...) stacks on top and darkens it.
         _gd.RasterizerState = RasterizerState.CullNone;
 
         WaterWaves.Apply(_waterEffect, viewProjection, _controller.CamPos, _atlas, totalTime);
         _waterEffect.Parameters["SkyBrightness"]?.SetValue(_dayNight.SkyBrightness);
 
+        // Pass 1: depth only
+        _gd.BlendState = DepthOnlyBlend;
+        _gd.DepthStencilState = DepthStencilState.Default;
+        foreach (var pass in _waterEffect.CurrentTechnique.Passes)
+        {
+            pass.Apply();
+            _world.DrawWater(_gd);
+        }
+
+        // Pass 2: colour, only where this fragment is the nearest water (same geometry, so equal depth passes)
+        _gd.BlendState = BlendState.AlphaBlend;
+        _gd.DepthStencilState = DepthStencilState.DepthRead;
         foreach (var pass in _waterEffect.CurrentTechnique.Passes)
         {
             pass.Apply();
             _world.DrawWater(_gd);
         }
     }
+
+    private static readonly BlendState DepthOnlyBlend = new() { ColorWriteChannels = ColorWriteChannels.None };
 
     // Black wireframe box around the block being looked at.
     private void DrawTargetOutline((int x, int y, int z) target)
