@@ -17,6 +17,7 @@ public sealed class KeyBindings
 
         [GameAction.BreakBlock]  = Binding.FromMouse(GameMouseButton.Left),
         [GameAction.PlaceBlock]  = Binding.FromMouse(GameMouseButton.Right),
+        [GameAction.SelectBlock] = Binding.FromMouse(GameMouseButton.Middle),
         [GameAction.Hotbar1] = Keys.D1, [GameAction.Hotbar2] = Keys.D2, [GameAction.Hotbar3] = Keys.D3,
         [GameAction.Hotbar4] = Keys.D4, [GameAction.Hotbar5] = Keys.D5, [GameAction.Hotbar6] = Keys.D6,
         [GameAction.Hotbar7] = Keys.D7, [GameAction.Hotbar8] = Keys.D8, [GameAction.Hotbar9] = Keys.D9,

@@ -4,6 +4,7 @@
   "transparent": false,
   "fullBlock": true,
   "replaceable": false,
+  "gravity": true,
   "emissive": false,
   "emission": {
     "r": 0,

@@ -106,9 +106,6 @@ public static class ChunkMesher
 
         public void Clear() { V.Clear(); I.Clear(); F.Clear(); W.Clear(); }
 
-        // top[c] = height of vertex c's upper edge when that vertex is on the top of the block (1 = full block). Water
-        // passes a different height per corner so its surface slopes (see FluidCornerHeight). The face index (F) and
-        // wave weight (W) streams are kept for the water vertex format; waves are off for now, so the weight is always 0.
         public void AddFace(int f, Vector3 pos, Color color, Color skyColor, TextureRegion region, float[] ao, float[] top)
         {
             int start = V.Count;
@@ -146,15 +143,69 @@ public static class ChunkMesher
 
             if (ao[0] + ao[2] > ao[1] + ao[3])
             {
-                // diagonal 0-2 (the brighter pair)
-                I.Add(start);     I.Add(start + 1); I.Add(start + 2);
-                I.Add(start);     I.Add(start + 2); I.Add(start + 3);
+                I.Add(start);    I.Add(start + 1); I.Add(start + 2);
+                I.Add(start);    I.Add(start + 2); I.Add(start + 3);
             }
             else
             {
-                // diagonal 1-3
                 I.Add(start + 1); I.Add(start + 2); I.Add(start + 3);
                 I.Add(start + 1); I.Add(start + 3); I.Add(start);
+            }
+        }
+
+        public void AddCross(Vector3 pos, Color color, Color skyColor, TextureRegion region)
+        {
+            float insetU = BlockRegistry.Instance.InsetU;
+            float insetV = BlockRegistry.Instance.InsetV;
+            float widthU = region.U1 - region.U0;
+            float heightV = region.V1 - region.V0;
+
+            float r = color.R / 255f, g = color.G / 255f, b = color.B / 255f, a = color.A / 255f;
+            float sr = skyColor.R / 255f, sg = skyColor.G / 255f, sb = skyColor.B / 255f;
+
+            Vector2[] uvs = { new(0, 1), new(0, 0), new(1, 0), new(1, 1) };
+
+            Vector3[][] diagonalPairs = new Vector3[][]
+            {
+                // Plane 1: (0.15, 0, 0.15) to (0.85, 1, 0.85)
+                new Vector3[] { new(0.15f, 0f, 0.15f), new(0.15f, 1f, 0.15f), new(0.85f, 1f, 0.85f), new(0.85f, 0f, 0.85f) },
+                // Plane 2: (0.15, 0, 0.85) to (0.85, 1, 0.15)
+                new Vector3[] { new(0.15f, 0f, 0.85f), new(0.15f, 1f, 0.85f), new(0.85f, 1f, 0.15f), new(0.85f, 0f, 0.15f) }
+            };
+
+            foreach (var quad in diagonalPairs)
+            {
+                // Front face
+                int start = V.Count;
+                for (int c = 0; c < 4; c++) { F.Add(0); W.Add(0f); }
+
+                for (int c = 0; c < 4; c++)
+                {
+                    var uv = new Vector2(
+                        region.U0 + insetU + uvs[c].X * (widthU - 2f * insetU),
+                        region.V0 + insetV + uvs[c].Y * (heightV - 2f * insetV));
+
+                    V.Add(new VertexPositionColorTextureSky(quad[c] + pos, new Color(r, g, b, a), uv, new Color(sr, sg, sb, 1f)));
+                }
+
+                I.Add(start);     I.Add(start + 1); I.Add(start + 2);
+                I.Add(start);     I.Add(start + 2); I.Add(start + 3);
+
+                // Back face (reverse winding)
+                int startRev = V.Count;
+                for (int c = 0; c < 4; c++) { F.Add(0); W.Add(0f); }
+
+                for (int c = 3; c >= 0; c--)
+                {
+                    var uv = new Vector2(
+                        region.U0 + insetU + uvs[c].X * (widthU - 2f * insetU),
+                        region.V0 + insetV + uvs[c].Y * (heightV - 2f * insetV));
+
+                    V.Add(new VertexPositionColorTextureSky(quad[c] + pos, new Color(r, g, b, a), uv, new Color(sr, sg, sb, 1f)));
+                }
+
+                I.Add(startRev);     I.Add(startRev + 1); I.Add(startRev + 2);
+                I.Add(startRev);     I.Add(startRev + 2); I.Add(startRev + 3);
             }
         }
     }
@@ -194,18 +245,9 @@ public static class ChunkMesher
         return false;
     }
 
-    // Minecraft's rule for which water faces exist (BlockFluids.shouldSideBeRendered): never against more water,
-    // the top always, and the sides / bottom only where the neighbour is not an opaque cube.
     private static bool WaterFaceVisible(int f, in BlockInfo nb) =>
         !nb.IsWater && (f == 2 || !nb.Occludes);
 
-    // Height of the water surface at one top corner of the water block at index i (Minecraft's
-    // RenderBlocks.getFluidHeight). cx / cz are 0 or 1: which corner of the block, in X and Z.
-    //
-    // The corner is shared by four blocks (this one and the three around that corner), so the four water blocks that
-    // meet there all compute the same height and the surface has no gaps. Each water block contributes how much of it
-    // is air; sources and falling water count ten times as much, so slopes lean toward them. Air counts as fully
-    // empty, solid blocks are ignored, and water above any of the four makes the corner full height.
     private static float FluidCornerHeight(byte[] blocks, BlockInfo[] info, int i, int cx, int cz)
     {
         float total = 0f;
@@ -236,12 +278,9 @@ public static class ChunkMesher
             }
         }
 
-        return 1f - total / count; // count > 0: the water block itself is one of the four
+        return 1f - total / count;
     }
 
-    // Picks the better lit of two cells (summed over sky + the three block light channels).
-    // Water faces that border air are lit from whichever side is brighter, so a face looking into
-    // a dim air pocket (or from a dim pocket into bright water) can't come out nearly black.
     private static int BrighterCell(byte[][] light, int waterCell, int airCell)
     {
         int w = light[0][waterCell] + light[1][waterCell] + light[2][waterCell] + light[3][waterCell];
@@ -264,8 +303,8 @@ public static class ChunkMesher
         var registry = BlockRegistry.Instance;
         var info = registry.Info;
         var ao = new float[4];
-        var cornerHeights = new float[4]; // water: surface height at each top corner, index = cx + 2 * cz
-        var waterTop = new float[4];      // water: the same heights, arranged per vertex of the face being built
+        var cornerHeights = new float[4];
+        var waterTop = new float[4];
 
         for (int y = 0; y < Chunk.Size; y++)
         for (int z = 0; z < Chunk.Size; z++)
@@ -278,7 +317,16 @@ public static class ChunkMesher
 
             Builder builder = self.IsWater ? b.Water : b.Solid;
             var pos = new Vector3(ox + x, oy + y, oz + z);
-            bool cornersReady = false; // water corner heights are only worked out if a face is actually drawn
+
+            // Handle cross/X-pane model blocks (flowers, tall grass, etc.)
+            if (self.IsCross)
+            {
+                LightColors(in self, 2, i, b.Light, out var crossColor, out var crossSkyColor);
+                builder.AddCross(pos, crossColor, crossSkyColor, registry.FastRegion(id, 2));
+                continue;
+            }
+
+            bool cornersReady = false;
 
             for (int f = 0; f < 6; f++)
             {
@@ -300,8 +348,6 @@ public static class ChunkMesher
                     faceAo = ao;
                 }
 
-                // Water's top edge is lower the thinner the flow, and each corner is averaged with the water around it
-                // (FluidCornerHeight) so neighbouring blocks line up into a smooth slope. Everything else is a full cube.
                 float[] top = FullTop;
                 if (self.IsWater)
                 {
@@ -313,7 +359,6 @@ public static class ChunkMesher
                         cornersReady = true;
                     }
 
-                    // Each vertex of this face sits at one corner of the block; pick that corner's height
                     for (int v = 0; v < 4; v++)
                     {
                         Vector3 corner = FaceCorners[f][v];
@@ -322,8 +367,6 @@ public static class ChunkMesher
                     top = waterTop;
                 }
 
-                // Water under a solid block is lit from its own cell; every other water face (surface, or a wall /
-                // ceiling facing air) from the brighter of the water cell and the cell it looks into.
                 int lightSample = !self.IsWater ? n
                     : f == 2 && info[nbId].Occludes ? i
                     : BrighterCell(b.Light, i, n);
@@ -344,7 +387,7 @@ public static class ChunkMesher
             result.WaterV = b.Water.V.ToArray();
             result.WaterI = b.Water.I.ToArray();
             result.WaterF = b.Water.F.ToArray();
-            result.WaterW = b.Water.W.ToArray(); // Returns float[] matching Chunk.cs
+            result.WaterW = b.Water.W.ToArray();
         }
 
         return result;
@@ -406,13 +449,9 @@ public static class ChunkMesher
         }
     }
 
-    // Block light and sky light are kept in separate colors so the sky part can be scaled by the
-    // time of day at draw time. The shader combines them as max(block, sky * SkyBrightness), which at
-    // full brightness matches the old single baked color of max(sky, block) * shade * tint.
     private static void LightColors(in BlockInfo self, int face, int n, byte[][] light,
-                                    out Color block, out Color sky)
+                                     out Color block, out Color sky)
     {
-        // Lamps ignore the sky entirely, so they stay at full brightness all night
         if (self.Emissive)
         {
             block = new Color(self.TintR, self.TintG, self.TintB, 1f);

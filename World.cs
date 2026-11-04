@@ -13,46 +13,45 @@ public class World
     public const int Height = ChunksY * Chunk.Size; // 128
     public const int SeaLevel = 64;
 
-    // How many columns around the player stay loaded. Meshes exist out to LoadRadius - 1.
     public int LoadRadius = 16;
-    private int UnloadRadius => LoadRadius + 2; // hysteresis, so chunks don't thrash at the boundary
+    private int UnloadRadius => LoadRadius + 2;
 
-    // Only the main thread ever touches these collections
     private readonly Dictionary<(int, int), Column> _columns = new();
     private readonly HashSet<(int, int)> _generating = new();
-    private readonly HashSet<Chunk> _pending = new();   // need a (background) remesh
-    private readonly HashSet<Chunk> _urgent = new();    // need an immediate remesh (player edits)
-    private readonly HashSet<Chunk> _inFlight = new();  // a mesh job is running
+    private readonly HashSet<Chunk> _pending = new();
+    private readonly HashSet<Chunk> _urgent = new();
+    private readonly HashSet<Chunk> _inFlight = new();
     private readonly List<Chunk> _visible = new();
 
     private readonly byte _airId;
 
     private bool _urgentMode;
 
-    // Worker -> main thread hand-off
     private readonly ConcurrentQueue<Column> _generated = new();
     private readonly ConcurrentQueue<MeshData> _meshed = new();
 
     private readonly TerrainGenerator _gen;
+    private readonly CaveCarver _caves;
     private readonly PlacedFeatures _features;
     private readonly WorkerPool _pool;
-     private readonly int _maxGenInFlight, _maxMeshInFlight;
+    private readonly int _maxGenInFlight, _maxMeshInFlight;
     private (int x, int z) _lastCenter = (int.MinValue, 0);
 
     public readonly LightMap Light;
-    private readonly FluidSimulator _fluids;
-    // Light levels the sky is currently darkened by (set from the day/night cycle each frame)
+    private readonly BlockTickScheduler _ticks;
     public int SkyDarkness;
 
     public World(int seed)
     {
-        // Cache block IDs from the registry.
         _airId = BlockRegistry.Instance.GetId("cuboidfever:air");
 
         _gen = new TerrainGenerator(seed);
+        _caves = new CaveCarver(seed, BlockRegistry.Instance);
         _features = new PlacedFeatures(seed, BlockRegistry.Instance);
         Light = new LightMap(this);
-        _fluids = new FluidSimulator(this);
+        _ticks = new BlockTickScheduler(this);
+        _ticks.Register(TickKind.Water, new FluidSimulator(this));
+        _ticks.Register(TickKind.Gravity, new GravityBlocks(this));
         _pool = new WorkerPool(Math.Clamp(Environment.ProcessorCount - 2, 2, 8));
         _maxGenInFlight = _pool.Count + 2;
         _maxMeshInFlight = _pool.Count * 3;
@@ -61,9 +60,7 @@ public class World
     public int TotalChunks => _columns.Count * ChunksY;
     public int VisibleChunks => _visible.Count;
     public int PendingWork => _generating.Count + _inFlight.Count + _pending.Count;
-    public int PendingFluidUpdates => _fluids.PendingUpdates;
-
-    // =====================  LOOKUPS  =====================
+    public int PendingBlockUpdates => _ticks.PendingUpdates;
 
     public Column GetColumn(int cx, int cz) => _columns.TryGetValue((cx, cz), out var c) ? c : null;
 
@@ -85,11 +82,18 @@ public class World
             : col.GetBlock(x & 15, y, z & 15);
     }
 
-    // Solid = blocks you collide with.
     public bool IsSolid(int x, int y, int z)
     {
         byte b = GetBlock(x, y, z);
         return BlockRegistry.Instance.Info[b].Solid;
+    }
+
+    private static readonly BlockInfo Wall = new() { Solid = true, Occludes = true, FluidLevel = -1 };
+
+    public BlockInfo GetInfoOrWall(int x, int y, int z)
+    {
+        if (y < 0 || !IsColumnLoaded(x, z)) return Wall;
+        return BlockRegistry.Instance.Info[GetBlock(x, y, z)];
     }
 
     public void RemeshAll()
@@ -102,9 +106,6 @@ public class World
         }
     }
 
-    // =====================  PER-FRAME UPDATE  =====================
-
-    // Call once per frame, after any block edits
     public void Update(GraphicsDevice device, Vector3 camPos, float time)
     {
         int ccx = (int)MathF.Floor(camPos.X / 16f);
@@ -119,13 +120,11 @@ public class World
             _lastCenter = (ccx, ccz);
         }
 
-        _fluids.Advance(time); // water flow; its edits are queued for the meshing below
+        _ticks.Advance(time);
         BuildUrgent(device);
         DispatchMeshJobs(device, camPos);
         DrainMeshed(device);
     }
-
-    // ---- Generation ----
 
     private readonly List<(int d, int x, int z)> _cand = new();
 
@@ -147,7 +146,7 @@ public class World
         }
         if (_cand.Count == 0) return;
 
-        _cand.Sort((a, b) => a.d.CompareTo(b.d)); // nearest first
+        _cand.Sort((a, b) => a.d.CompareTo(b.d));
 
         int count = Math.Min(slots, _cand.Count);
         for (int i = 0; i < count; i++)
@@ -158,11 +157,11 @@ public class World
         }
     }
 
-    // Runs on a worker thread. Touches nothing shared: it builds a complete column and hands it over.
     private void GenerateJob(int cx, int cz)
     {
         var blocks = new byte[Chunk.Size, Height, Chunk.Size];
         _gen.GenerateColumn(cx, cz, blocks);   // terrain shape + surface
+        _caves.Carve(cx, cz, blocks);          // tunnels and rooms, before features so trees never float over a hole
         _features.Generate(cx, cz, blocks);    // trees, rocks, etc.
 
         var col = new Column(cx, cz);
@@ -185,7 +184,7 @@ public class World
             _generating.Remove((col.CX, col.CZ));
 
             int dx = col.CX - ccx, dz = col.CZ - ccz;
-            if (dx * dx + dz * dz > UnloadRadius * UnloadRadius) continue; // player moved away meanwhile
+            if (dx * dx + dz * dz > UnloadRadius * UnloadRadius) continue;
             if (_columns.ContainsKey((col.CX, col.CZ))) continue;
 
             _columns[(col.CX, col.CZ)] = col;
@@ -197,7 +196,6 @@ public class World
         }
     }
 
-    // A column becomes meshable once all 8 neighbors exist
     private void TryActivate(Column col)
     {
         if (col == null || col.Active) return;
@@ -209,8 +207,6 @@ public class World
         foreach (var chunk in col.Chunks)
             if (!chunk.IsEmpty) MarkDirty(chunk);
     }
-
-    // ---- Unloading ----
 
     private readonly List<(int, int)> _toRemove = new();
 
@@ -230,7 +226,7 @@ public class World
         {
             foreach (var chunk in _columns[key].Chunks)
             {
-                chunk.Unloaded = true; // a still-running mesh job for it will be discarded
+                chunk.Unloaded = true;
                 chunk.DisposeMesh();
                 _pending.Remove(chunk);
                 _urgent.Remove(chunk);
@@ -239,8 +235,6 @@ public class World
         }
         if (_toRemove.Count > 0) Light.InvalidateCache();
     }
-
-    // ---- Meshing ----
 
     private Column[] Neighborhood(int cx, int cz)
     {
@@ -251,7 +245,6 @@ public class World
         return cols;
     }
 
-    // Player edits: mesh on the main thread right now, so the change shows this frame
     private void BuildUrgent(GraphicsDevice device)
     {
         if (_urgent.Count == 0) return;
@@ -276,14 +269,13 @@ public class World
         _emptyDone.Clear();
         foreach (var c in _pending)
         {
-            if (_inFlight.Contains(c)) continue; // wait for the running job to finish first
+            if (_inFlight.Contains(c)) continue;
             if (c.IsEmpty) { _emptyDone.Add(c); continue; }
 
             var ctr = (c.Bounds.Min + c.Bounds.Max) * 0.5f;
             _ready.Add((Vector3.DistanceSquared(ctr, camPos), c));
         }
 
-        // Empty chunks need no job, just their old mesh cleared
         foreach (var c in _emptyDone)
         {
             c.ApplyMesh(device, new MeshData { Chunk = c, Version = c.Version });
@@ -294,7 +286,7 @@ public class World
         int slots = _maxMeshInFlight - _inFlight.Count;
         if (slots <= 0 || _ready.Count == 0) return;
 
-        _ready.Sort((a, b) => a.d.CompareTo(b.d)); // nearest first
+        _ready.Sort((a, b) => a.d.CompareTo(b.d));
 
         int count = Math.Min(slots, _ready.Count);
         for (int i = 0; i < count; i++)
@@ -309,7 +301,6 @@ public class World
         }
     }
 
-    // GPU uploads must happen on the main thread, so they're spread over frames
     private void DrainMeshed(GraphicsDevice device)
     {
         var sw = Stopwatch.StartNew();
@@ -318,7 +309,6 @@ public class World
             _inFlight.Remove(m.Chunk);
             if (m.Chunk.Unloaded) continue;
 
-            // Skip results older than what's already on screen (e.g. after an urgent rebuild)
             if (m.Version > m.Chunk.AppliedVersion)
             {
                 m.Chunk.ApplyMesh(device, m);
@@ -326,8 +316,6 @@ public class World
             }
         }
     }
-
-    // =====================  EDITING  =====================
 
     private void MarkDirty(Chunk c)
     {
@@ -349,8 +337,6 @@ public class World
         if (c != null) MarkDirty(c);
     }
 
-    // 'urgent' = rebuild the affected meshes on the main thread right now, so the edit shows this frame (player edits).
-    // Pass false for bulk or automatic changes such as flowing water, which remesh on the worker threads instead.
     public void SetBlock(int x, int y, int z, byte id, bool urgent = true)
     {
         if ((uint)y >= Height) return;
@@ -368,8 +354,6 @@ public class World
 
         _urgentMode = urgent;
 
-        // Mark dirty all chunks in the 1-block neighborhood (including diagonals and vertical bounds)
-        // so that all adjacent water vertices and face weights update instantly.
         for (int dz = -1; dz <= 1; dz++)
         for (int dy = -1; dy <= 1; dy++)
         for (int dx = -1; dx <= 1; dx++)
@@ -377,15 +361,13 @@ public class World
             MarkDirtyAt(x + dx, y + dy, z + dz);
         }
 
-        // One water level becoming another changes the shape but not the light, so skip the light update.
         var info = BlockRegistry.Instance.Info;
         if (!(info[old].IsWater && info[id].IsWater)) Light.OnBlockChanged(x, y, z);
         _urgentMode = false;
 
-        _fluids.OnBlockChanged(x, y, z); // wake any water at or next to this block
+        _ticks.OnBlockChanged(x, y, z);
     }
     
-    // A light change can alter faces in a neighboring chunk too
     public void MarkLightDirty(int x, int y, int z)
     {
         int lx = x & 15, ly = y & 15, lz = z & 15;
@@ -398,8 +380,6 @@ public class World
         if (lz == 15) MarkDirtyAt(x, y, z + 1);
     }
 
-    // =====================  DRAWING  =====================
-
     public void UpdateVisibility(BoundingFrustum frustum, Vector3 camPos, float time)
     {
         _visible.Clear();
@@ -407,16 +387,17 @@ public class World
         float maxSq = maxDist * maxDist;
 
         foreach (var col in _columns.Values)
-        foreach (var chunk in col.Chunks)
         {
-            if (!chunk.HasMesh) continue;
+            foreach (var chunk in col.Chunks)
+            {
+                if (!chunk.HasMesh) continue;
 
-            // Horizontal distance only, so a high camera doesn't hide distant terrain
-            float dx = (chunk.Bounds.Min.X + 8f) - camPos.X;
-            float dz = (chunk.Bounds.Min.Z + 8f) - camPos.Z;
-            if (dx * dx + dz * dz > maxSq) continue;
+                float dx = (chunk.Bounds.Min.X + 8f) - camPos.X;
+                float dz = (chunk.Bounds.Min.Z + 8f) - camPos.Z;
+                if (dx * dx + dz * dz > maxSq) continue;
 
-            if (frustum.Intersects(chunk.Bounds)) _visible.Add(chunk);
+                if (frustum.Intersects(chunk.Bounds)) _visible.Add(chunk);
+            }
         }
     }
 
@@ -430,8 +411,6 @@ public class World
         foreach (var chunk in _visible) chunk.DrawWater(device);
     }
 
-    // Voxel DDA (Amanatides & Woo). Water (any flow level) is skipped, so you can target the seabed through it.
-    // 'hit' is the solid block; 'prev' is the empty block the ray passed through just before it.
     public bool Raycast(Vector3 origin, Vector3 dir, float maxDist,
                         out (int x, int y, int z) hit, out (int x, int y, int z) prev)
     {

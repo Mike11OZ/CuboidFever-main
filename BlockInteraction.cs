@@ -4,6 +4,8 @@ namespace CuboidFever;
 public sealed class BlockInteraction
 {
     private const float ReachDistance = 5f; // Easy to tweak here!
+    private const float BreakInterval = 0.2f; // Time between continuous breaks when holding
+    private const float PlaceInterval = 0.2f;  // Time between continuous placements when holding
 
     private readonly World _world;
     private readonly Player _player;
@@ -13,6 +15,9 @@ public sealed class BlockInteraction
     private readonly ParticleSystem _particles;
     private readonly DayNightCycle _dayNight;
     private readonly byte _airId;
+
+    private float _breakCooldown;
+    private float _placeCooldown;
 
     public BlockInteraction(World world, Player player, PlayerController controller, Hotbar hotbar,
                             ActionInput input, ParticleSystem particles, DayNightCycle dayNight)
@@ -33,17 +38,53 @@ public sealed class BlockInteraction
     public (int x, int y, int z) TargetPrev { get; private set; }
 
     // 'windowActive' stops clicks from acting while the window is unfocused.
-    public void Update(bool windowActive)
+    public void Update(float dt, bool windowActive)
     {
         HasTarget = _world.Raycast(_controller.CamPos, _controller.Forward, ReachDistance,
                                    out var target, out var targetPrev);
         Target = target;
         TargetPrev = targetPrev;
 
-        if (!windowActive || !HasTarget) return;
+        if (!windowActive)
+        {
+            _breakCooldown = 0f;
+            _placeCooldown = 0f;
+            return;
+        }
 
-        if (_input.WasPressed(GameAction.BreakBlock)) Break();
-        if (_input.WasPressed(GameAction.PlaceBlock)) Place();
+        // Tick down cooldowns
+        if (_breakCooldown > 0) _breakCooldown -= dt;
+        if (_placeCooldown > 0) _placeCooldown -= dt;
+
+        if (_input.WasPressed(GameAction.SelectBlock)) Select();
+
+        // Continuous Break (Left-Click Hold)
+        if (_input.IsDown(GameAction.BreakBlock))
+        {
+            if (_input.WasPressed(GameAction.BreakBlock) || (_breakCooldown <= 0 && HasTarget))
+            {
+                Break();
+                _breakCooldown = BreakInterval;
+            }
+        }
+        else
+        {
+            _breakCooldown = 0f;
+        }
+
+        // Continuous Place (Right-Click Hold)
+        if (_input.IsDown(GameAction.PlaceBlock))
+        {
+            if (_input.WasPressed(GameAction.PlaceBlock) || (_placeCooldown <= 0 && HasTarget))
+            {
+                Place();
+                _placeCooldown = PlaceInterval;
+            }
+        }
+        else
+        {
+            _placeCooldown = 0f;
+        }
     }
 
     private void Break()
@@ -61,8 +102,20 @@ public sealed class BlockInteraction
         if (TargetPrev == Target) return;
 
         var (x, y, z) = TargetPrev;
-        if (_player.Overlaps(x, y, z)) return; // don't place a block inside yourself
+        if (_player.Overlaps(x, y, z)) return;
 
         _world.SetBlock(x, y, z, _hotbar.SelectedId);
+    }
+
+    private void Select()
+    {
+        var (x, y, z) = Target;
+        byte block = _world.GetBlock(x, y, z);
+        
+        // Don't pick air
+        if (block == _airId) return;
+
+        // Attempt to select the block if it exists in the hotbar
+        _hotbar.TrySelectBlock(block);
     }
 }

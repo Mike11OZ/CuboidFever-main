@@ -3,7 +3,6 @@ using Microsoft.Xna.Framework.Graphics;
 
 namespace CuboidFever;
 
-// The F3 debug text. It holds references to everything it reports on, so drawing it takes no arguments.
 public class DebugOverlay
 {
     private readonly SpriteFont _font;
@@ -42,7 +41,6 @@ public class DebugOverlay
         _interaction = interaction;
     }
 
-    // Call once per frame while playing: handles the show/hide toggle and counts frames.
     public void Update(GameTime gameTime)
     {
         if (_input.WasPressed(GameAction.ToggleDebugOverlay))
@@ -70,7 +68,7 @@ public class DebugOverlay
             $"FPS: {_currentFps} (cap: {fpsStr})\n" +
             $"Leaves: {ChunkMesher.LeafCullDepth} | AO: {(ChunkMesher.AmbientOcclusion ? "on" : "off")}\n" +
             $"Time: {_dayNight.TimeString} | Day: {_dayNight.DayLengthSeconds:F0}s | Sky darkness: -{_dayNight.SkyDarknessLevels}{(_dayNight.Paused ? " | PAUSED" : "")}\n" +
-            $"Chunks: {_world.VisibleChunks}/{_world.TotalChunks} | Queue: {_world.PendingWork} | Water updates: {_world.PendingFluidUpdates}\n" +
+            $"Chunks: {_world.VisibleChunks}/{_world.TotalChunks} | Queue: {_world.PendingWork} | Block updates: {_world.PendingBlockUpdates}\n" +
             $"XYZ: {_player.Position.X:F2} / {_player.Position.Y:F2} / {_player.Position.Z:F2}\n" +
             $"Holding: {_hotbar.SelectedName} | Music: {_audio.CurrentSongName}\n\n" +
             HighlightedBlockText();

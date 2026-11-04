@@ -16,16 +16,16 @@ public class BlockDefinition
     public bool Emissive { get; set; }
 
     // Whether this block occupies an entire voxel.
-    // Defaults to true for compatibility with existing block JSON files.
     public bool FullBlock { get; set; } = true;
 
     public string RenderLayer { get; set; } = "opaque";
+    public string RenderType { get; set; } = "cube"; // <-- Add this: "cube" or "cross"
 
-    // Fluids only. "fluid" names the kind ("water"); "fluidLevel" is Minecraft's flow value:
-    // 0 = source, 1-7 = flowing (higher = thinner, further from a source), 8 = falling.
-    // Every level of one fluid needs its own block definition (see water.json, water_flow_N.json, water_falling.json).
     public string Fluid { get; set; }
     public int FluidLevel { get; set; }
+
+    // Falls when the block below is not solid (sand). See GravityBlocks. A block can be a fluid or have gravity, not both.
+    public bool Gravity { get; set; }
 
     public EmissionData Emission { get; set; } = new();
     public ColorData Tint { get; set; } = new ColorData(255, 255, 255);

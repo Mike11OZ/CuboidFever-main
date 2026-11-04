@@ -106,6 +106,7 @@ public class Game1 : Game
         // ---- Initialize Audio Handler ----
         _audioManager = new AudioManager();
         _audioManager.Volume = 0.8f;
+        _audioManager.InitializePlaylist(); // Preloads all songs into memory during startup
         // Do not play immediately; wait for spawn
 
         // Built last because it reads from almost everything above
@@ -153,7 +154,7 @@ public class Game1 : Game
         _controller.Update(dt, IsActive);
         _screenEffects.Update(dt, new ScreenEffectContext(_world, _controller.CamPos, totalTime));
         _hotbar.Update();
-        _blockInteraction.Update(IsActive);
+        _blockInteraction.Update(dt, IsActive);
         _particleSystem.Update(dt, _world);
 
         _world.Update(GraphicsDevice, _controller.CamPos, totalTime);

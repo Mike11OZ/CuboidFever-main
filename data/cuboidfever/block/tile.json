@@ -1,5 +1,5 @@
 {
-  "name": "cuboidfever:bedrock",
+  "name": "cuboidfever:tile",
   "solid": true,
   "transparent": false,
   "fullBlock": true,
@@ -12,6 +12,6 @@
   },
   "tint": [255, 255, 255],
   "textures": {
-    "all": "cuboidfever:bedrock"
+    "all": "cuboidfever:tile"
   }
 }

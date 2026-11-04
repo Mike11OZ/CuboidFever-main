@@ -1,0 +1,13 @@
+{
+  "name": "cuboidfever:yellow_lamp",
+  "solid": true,
+  "transparent": false,
+  "fullBlock": true,
+  "replaceable": false,
+  "emissive": true,
+  "emission": { "r": 15, "g": 15, "b": 0 },
+  "tint": [255, 255, 100],
+  "textures": {
+    "all": "cuboidfever:lamp"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "cuboidfever:flower",
+  "solid": false,
+  "transparent": true,
+  "fullBlock": false,
+  "replaceable": true,
+  "renderType": "cross",
+  "renderLayer": "transparent",
+  "lightAttenuation": 0,
+  "tint": [255, 255, 255],
+  "textures": {
+    "all": "cuboidfever:flower"
+  }
+}

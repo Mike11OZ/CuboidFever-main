@@ -1,6 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
-using System.Linq;
+using System.Text.Json;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Media;
 
@@ -8,7 +9,15 @@ namespace CuboidFever;
 
 public class AudioManager
 {
-    private Song _currentSong = null!;
+    // ---- Configuration ----
+    private const float MinDelaySeconds = 0.0f; // Minimum delay between songs (in seconds)
+    private const float MaxDelaySeconds = 30.0f; // Maximum delay between songs (in seconds)
+    // Tip: If you want a fixed, constant delay instead of a random range, 
+    // simply set MinDelaySeconds and MaxDelaySeconds to the exact same value (e.g., 5.0f).
+
+    private Dictionary<string, Song> _songs = new();
+    private List<string> _availableTrackNames = new();
+    
     private float _delaySeconds;
     private float _currentDelayTimer;
     
@@ -17,7 +26,6 @@ public class AudioManager
     private float _volume = 0.8f;
     private readonly Random _random = new();
 
-    // Expose the current track name for UI/Debug overlays
     public string CurrentSongName { get; private set; } = "None";
 
     public float Volume
@@ -31,23 +39,22 @@ public class AudioManager
     }
 
     /// <summary>
-    /// Starts the background music system, initiating the initial random spawn delay (1 to 5 minutes).
+    /// Loads tracks specified in data/cuboidfever/music_list.json into memory upfront to prevent runtime hitches.
+    /// Call this once during game startup.
     /// </summary>
-    public void StartPlaylist()
-    {
-        _isPlaying = true;
-        _isWaitingForDelay = true;
-        _currentDelayTimer = 0f;
-        // Random delay between 1 and 5 minutes (60 to 300 seconds)
-        _delaySeconds = (float)(_random.NextDouble() * 240.0 + 60.0);
-        CurrentSongName = "None (Waiting for music...)";
-    }
-
-    public void PlayRandomSong()
+    public void InitializePlaylist()
     {
         try
         {
+            string jsonPath = Path.Combine(AppContext.BaseDirectory, "data", "cuboidfever", "music_list.json");
             string soundsDir = Path.Combine(AppContext.BaseDirectory, "assets", "cuboidfever", "sounds");
+
+            if (!File.Exists(jsonPath))
+            {
+                Console.WriteLine($"[Audio] Music list JSON not found: {jsonPath}");
+                CurrentSongName = "None (Music List Not Found)";
+                return;
+            }
 
             if (!Directory.Exists(soundsDir))
             {
@@ -56,31 +63,77 @@ public class AudioManager
                 return;
             }
 
-            // Find all .ogg files, excluding "cuboid" (case-insensitive)
-            var oggFiles = Directory.GetFiles(soundsDir, "*.ogg")
-                .Select(Path.GetFileNameWithoutExtension)
-                .Where(name => !string.Equals(name, "cuboid", StringComparison.OrdinalIgnoreCase))
-                .ToArray();
+            string jsonContent = File.ReadAllText(jsonPath);
+            List<string> trackNames = JsonSerializer.Deserialize<List<string>>(jsonContent);
 
-            if (oggFiles.Length == 0)
+            if (trackNames == null || trackNames.Count == 0)
             {
-                Console.WriteLine("[Audio] No music tracks found (excluding 'cuboid').");
-                CurrentSongName = "None (No Tracks Available)";
+                Console.WriteLine("[Audio] Music list is empty or invalid.");
+                CurrentSongName = "None (Music List Empty)";
                 return;
             }
 
-            // Pick a random song from the filtered list
-            string assetName = oggFiles[_random.Next(oggFiles.Length)];
-            string fullPath = Path.Combine(soundsDir, $"{assetName}.ogg");
+            foreach (var assetName in trackNames)
+            {
+                string fullPath = Path.Combine(soundsDir, $"{assetName}.ogg");
+                if (!File.Exists(fullPath))
+                {
+                    Console.WriteLine($"[Audio] Track file not found: {fullPath}");
+                    continue;
+                }
 
-            _currentSong = Song.FromUri(assetName, new Uri(fullPath, UriKind.Absolute));
+                try
+                {
+                    Song song = Song.FromUri(assetName, new Uri(fullPath, UriKind.Absolute));
+                    _songs[assetName] = song;
+                    _availableTrackNames.Add(assetName);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[Audio] Failed to load track {assetName}: {ex.Message}");
+                }
+            }
+
+            Console.WriteLine($"[Audio] Successfully preloaded {_songs.Count} music tracks from JSON.");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Audio] Failed to initialize playlist: {ex.Message}");
+        }
+    }
+
+    public void StartPlaylist()
+    {
+        if (_availableTrackNames.Count == 0)
+        {
+            CurrentSongName = "None (No Tracks Available)";
+            return;
+        }
+
+        _isPlaying = true;
+        _isWaitingForDelay = true;
+        _currentDelayTimer = 0f;
+        _delaySeconds = MinDelaySeconds >= MaxDelaySeconds 
+            ? MinDelaySeconds 
+            : (float)(_random.NextDouble() * (MaxDelaySeconds - MinDelaySeconds) + MinDelaySeconds);
+        CurrentSongName = "None (Waiting for music...)";
+    }
+
+    public void PlayRandomSong()
+    {
+        if (_availableTrackNames.Count == 0) return;
+
+        try
+        {
+            string assetName = _availableTrackNames[_random.Next(_availableTrackNames.Count)];
+            Song songToPlay = _songs[assetName];
+
             CurrentSongName = $"{assetName}.ogg";
-            
             _isPlaying = true;
             _isWaitingForDelay = false;
 
             MediaPlayer.Volume = _volume;
-            MediaPlayer.Play(_currentSong);
+            MediaPlayer.Play(songToPlay);
         }
         catch (Exception ex)
         {
@@ -106,13 +159,13 @@ public class AudioManager
         }
         else
         {
-            // If the current song has finished playing, start waiting for the next random 1-5 minute delay
             if (MediaPlayer.State == MediaState.Stopped)
             {
                 _isWaitingForDelay = true;
                 _currentDelayTimer = 0f;
-                // Generate a new random delay between 1 and 5 minutes (60 to 300 seconds)
-                _delaySeconds = (float)(_random.NextDouble() * 240.0 + 60.0);
+                _delaySeconds = MinDelaySeconds >= MaxDelaySeconds 
+                    ? MinDelaySeconds 
+                    : (float)(_random.NextDouble() * (MaxDelaySeconds - MinDelaySeconds) + MinDelaySeconds);
                 CurrentSongName = "None (Between Songs)";
             }
         }

@@ -35,7 +35,9 @@ public sealed class PlacedFeatures
             new BigOakTreeFeature(blocks),
             new PineTreeFeature(blocks),
             new BigPineTreeFeature(blocks),
-            new Boulder(blocks)
+            new Boulder(blocks),
+            new TallGrassFeature(blocks),
+            new FlowerFeature(blocks)
         };
 
         EnsureUniqueSalts(_features);

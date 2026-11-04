@@ -9,14 +9,15 @@ namespace CuboidFever;
 
 public struct BlockInfo
 {
-    public bool Transparent, Solid, FullBlock, Emissive, Occludes;
+    public bool Transparent, Solid, FullBlock, Emissive, Occludes, IsCross;
     public int LightAttenuation;
     public bool IsAir, IsWater, IsGlass, IsLeaves;
-    public float TintR, TintG, TintB;   // 0-1, used by emissive blocks
+    public float TintR, TintG, TintB;
 
-    // Water only (-1 for every other block): 0 = source, 1-7 = flowing, 8 = falling. Same meaning as the
-    // metadata value in Minecraft's BlockFlowing.
     public int FluidLevel;
+
+    // Which update rules the block follows when it or a neighbour changes (see BlockTickScheduler)
+    public TickKind Tick;
 }
 public sealed class BlockRegistry
 {
@@ -28,7 +29,6 @@ public sealed class BlockRegistry
 
     public TextureRegion FastRegion(byte id, int face) => _faceRegions[id * 6 + face];
 
-    // Builds the lookup tables. Needs the texture atlas, so it runs last in the constructor.
     private void Bake()
     {
         var atlas = TextureAtlas.Instance
@@ -42,6 +42,10 @@ public sealed class BlockRegistry
             Color tint = def.Tint?.ToXnaColor() ?? Color.White;
             string name = def.Name;
 
+            bool isWater = string.Equals(def.Fluid, "water", StringComparison.OrdinalIgnoreCase);
+            if (isWater && def.Gravity)
+                throw new InvalidDataException($"Block '{name}' cannot be both water and gravity-affected.");
+
             Info[id] = new BlockInfo
             {
                 Transparent = def.Transparent,
@@ -49,15 +53,16 @@ public sealed class BlockRegistry
                 FullBlock = def.FullBlock,
                 LightAttenuation = def.LightAttenuation,
                 Emissive = def.Emissive,
-                Occludes = def.Solid && !def.Transparent,
+                Occludes = def.Solid && !def.Transparent && def.RenderType.Equals("cube", StringComparison.OrdinalIgnoreCase),
+                IsCross = def.RenderType.Equals("cross", StringComparison.OrdinalIgnoreCase), // <-- Added mapping
                 IsAir = name.Equals("cuboidfever:air", StringComparison.OrdinalIgnoreCase),
-                IsWater = string.Equals(def.Fluid, "water", StringComparison.OrdinalIgnoreCase),
-                FluidLevel = string.Equals(def.Fluid, "water", StringComparison.OrdinalIgnoreCase) ? def.FluidLevel : -1,
+                IsWater = isWater,
+                FluidLevel = isWater ? def.FluidLevel : -1,
+                Tick = isWater ? TickKind.Water : def.Gravity ? TickKind.Gravity : TickKind.None,
                 IsGlass = name.Equals("cuboidfever:glass", StringComparison.OrdinalIgnoreCase),
                 IsLeaves = name.Equals("cuboidfever:leaves", StringComparison.OrdinalIgnoreCase),
                 TintR = tint.R / 255f, TintG = tint.G / 255f, TintB = tint.B / 255f
             };
-
             for (int f = 0; f < 6; f++)
                 _faceRegions[id * 6 + f] = GetTextureRegion(id, f);
         }
@@ -65,12 +70,10 @@ public sealed class BlockRegistry
         BuildWaterTable();
     }
 
-    // Water has one block per flow level, so the simulation can store a level as a plain block ID.
-    public const int WaterLevels = 9;           // 0 = source, 1-7 = flowing, 8 = falling
+    public const int WaterLevels = 9;
     public const int WaterSourceLevel = 0;
     public const int WaterFallingLevel = 8;
 
-    // Block ID for each water level (index = fluidLevel).
     public readonly byte[] WaterByLevel = new byte[WaterLevels];
     public byte WaterSource => WaterByLevel[WaterSourceLevel];
 
@@ -97,7 +100,7 @@ public sealed class BlockRegistry
         for (int level = 0; level < WaterLevels; level++)
             if (!seen[level])
                 throw new InvalidDataException(
-                    $"No water block defines fluidLevel {level} (needs water.json, water_flow_1-7.json and water_falling.json).");
+                    $"No water block defines fluidLevel {level}.");
     }
     public static BlockRegistry Instance { get; private set; }
 
@@ -114,7 +117,6 @@ public sealed class BlockRegistry
         PropertyNameCaseInsensitive = true
     };
 
-    
     public TextureRegion GetTextureRegion(byte id, int face)
     {
         var definition = Get(id);
@@ -147,14 +149,12 @@ public sealed class BlockRegistry
         if (string.IsNullOrWhiteSpace(textureName))
             textureName = definition.Texture;
 
-        // Preserve the old fallback behavior: atlas tile zero was dirt.
         if (string.IsNullOrWhiteSpace(textureName))
             textureName = "cuboidfever:dirt";
 
         return TextureAtlas.Instance.GetRegion(textureName);
     }
 
-    // Keep this compatibility method if other code still uses tile indices.
     public int GetTile(byte id, int face) =>
         GetTextureRegion(id, face).Index;
 
@@ -179,7 +179,6 @@ public sealed class BlockRegistry
                 ?? throw new InvalidDataException($"Invalid block JSON: {file}"))
             .ToList();
 
-        // Air must always be runtime ID 0.
         var air = definitions.SingleOrDefault(d =>
             d.Name.Equals("cuboidfever:air",
                 StringComparison.OrdinalIgnoreCase));
@@ -221,7 +220,6 @@ public sealed class BlockRegistry
             _definitions.Add(id, definition);
         }
 
-        // Read tag files after all block IDs have been assigned.
         if (Directory.Exists(tagDir))
         {
             foreach (string file in Directory.GetFiles(tagDir, "*.json"))
@@ -242,7 +240,6 @@ public sealed class BlockRegistry
             }
         }
 
-        // Load hotbar entries by name, not by numeric ID.
         string hotbarPath = Path.Combine(dataRoot, "hotbar.json");
         var hotbar = JsonSerializer.Deserialize<HotbarConfig>(
             File.ReadAllText(hotbarPath), JsonOptions)

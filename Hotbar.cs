@@ -28,6 +28,19 @@ public sealed class Hotbar
     public byte SelectedId => _ids[Slot];
     public string SelectedName => _names[Slot];
 
+    public bool TrySelectBlock(byte blockId)
+    {
+        for (int i = 0; i < _ids.Length; i++)
+        {
+            if (_ids[i] == blockId)
+            {
+                Slot = i;
+                return true;
+            }
+        }
+        return false; // Block is not currently in the hotbar
+    }
+
     // Number keys jump to a slot, the mouse wheel scrolls through them.
     public void Update()
     {

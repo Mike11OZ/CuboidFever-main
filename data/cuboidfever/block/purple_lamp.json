@@ -1,0 +1,13 @@
+{
+  "name": "cuboidfever:purple_lamp",
+  "solid": true,
+  "transparent": false,
+  "fullBlock": true,
+  "replaceable": false,
+  "emissive": true,
+  "emission": { "r": 10, "g": 2, "b": 15 },
+ "tint": [200, 100, 255],
+  "textures": {
+    "all": "cuboidfever:lamp"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "cuboidfever:orange_lamp",
+  "solid": true,
+  "transparent": false,
+  "fullBlock": true,
+  "replaceable": false,
+  "emissive": true,
+  "emission": { "r": 15, "g": 10, "b": 0 },
+  "tint": [255, 140, 50],
+  "textures": {
+    "all": "cuboidfever:lamp"
+  }
+}

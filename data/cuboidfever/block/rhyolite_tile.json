@@ -1,5 +1,5 @@
 {
-  "name": "cuboidfever:smooth_stone",
+  "name": "cuboidfever:rhyolite_tile",
   "solid": true,
   "transparent": false,
   "fullBlock": true,
@@ -12,6 +12,6 @@
   },
   "tint": [255, 255, 255],
   "textures": {
-    "all": "cuboidfever:smooth_stone"
+    "all": "cuboidfever:rhyolite_tile"
   }
 }

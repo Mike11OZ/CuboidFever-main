@@ -49,7 +49,7 @@ public class TerrainGenerator
         _grassId = blocks.GetId("cuboidfever:grass");
         _dirtId = blocks.GetId("cuboidfever:dirt");
         _sandId = blocks.GetId("cuboidfever:sand");
-        _bedrockId = blocks.GetId("cuboidfever:bedrock");
+        _bedrockId = blocks.GetId("cuboidfever:dragon_stone");
 
         var r = new Random(seed);
 

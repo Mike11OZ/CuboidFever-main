@@ -8,7 +8,7 @@ namespace CuboidFever;
 /// </summary>
 public sealed class Boulder : Feature
 {
-    private const int SpawnOneIn = 300;
+    private const int SpawnOneIn = 500;
     private const int MaxRadius = 2;
 
     private readonly byte _grassId;

@@ -14,7 +14,7 @@
   "tint": [80, 120, 255],
   "renderLayer": "translucent",
   "textures": {
-    "all": "cuboidfever:water"
+    "all": "cuboidfever:water_flowing"
   },
   "fluid": "water",
   "fluidLevel": 7
