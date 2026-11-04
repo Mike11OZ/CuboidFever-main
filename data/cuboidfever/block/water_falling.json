@@ -1,0 +1,21 @@
+{
+  "name": "cuboidfever:water_falling",
+  "solid": false,
+  "transparent": true,
+  "fullBlock": false,
+  "replaceable": true,
+  "emissive": false,
+  "lightAttenuation": 2,
+  "emission": {
+    "r": 0,
+    "g": 0,
+    "b": 0
+  },
+  "tint": [80, 120, 255],
+  "renderLayer": "translucent",
+  "textures": {
+    "all": "cuboidfever:water"
+  },
+  "fluid": "water",
+  "fluidLevel": 8
+}

@@ -25,7 +25,7 @@ public class World
     private readonly HashSet<Chunk> _inFlight = new();  // a mesh job is running
     private readonly List<Chunk> _visible = new();
 
-    private readonly byte _airId, _waterId;
+    private readonly byte _airId;
 
     private bool _urgentMode;
 
@@ -40,6 +40,7 @@ public class World
     private (int x, int z) _lastCenter = (int.MinValue, 0);
 
     public readonly LightMap Light;
+    private readonly FluidSimulator _fluids;
     // Light levels the sky is currently darkened by (set from the day/night cycle each frame)
     public int SkyDarkness;
 
@@ -47,11 +48,11 @@ public class World
     {
         // Cache block IDs from the registry.
         _airId = BlockRegistry.Instance.GetId("cuboidfever:air");
-        _waterId = BlockRegistry.Instance.GetId("cuboidfever:water");
 
         _gen = new TerrainGenerator(seed);
         _features = new PlacedFeatures(seed, BlockRegistry.Instance);
         Light = new LightMap(this);
+        _fluids = new FluidSimulator(this);
         _pool = new WorkerPool(Math.Clamp(Environment.ProcessorCount - 2, 2, 8));
         _maxGenInFlight = _pool.Count + 2;
         _maxMeshInFlight = _pool.Count * 3;
@@ -60,6 +61,7 @@ public class World
     public int TotalChunks => _columns.Count * ChunksY;
     public int VisibleChunks => _visible.Count;
     public int PendingWork => _generating.Count + _inFlight.Count + _pending.Count;
+    public int PendingFluidUpdates => _fluids.PendingUpdates;
 
     // =====================  LOOKUPS  =====================
 
@@ -117,6 +119,7 @@ public class World
             _lastCenter = (ccx, ccz);
         }
 
+        _fluids.Advance(time); // water flow; its edits are queued for the meshing below
         BuildUrgent(device);
         DispatchMeshJobs(device, camPos);
         DrainMeshed(device);
@@ -346,7 +349,9 @@ public class World
         if (c != null) MarkDirty(c);
     }
 
-    public void SetBlock(int x, int y, int z, byte id)
+    // 'urgent' = rebuild the affected meshes on the main thread right now, so the edit shows this frame (player edits).
+    // Pass false for bulk or automatic changes such as flowing water, which remesh on the worker threads instead.
+    public void SetBlock(int x, int y, int z, byte id, bool urgent = true)
     {
         if ((uint)y >= Height) return;
         var col = GetColumn(x >> 4, z >> 4);
@@ -355,13 +360,14 @@ public class World
         int lx = x & 15, lz = z & 15;
         var chunk = col.Chunks[y >> 4];
         int ly = y & 15;
-        if (chunk.GetBlock(lx, ly, lz) == id) return;
+        byte old = chunk.GetBlock(lx, ly, lz);
+        if (old == id) return;
 
         chunk.SetBlock(lx, ly, lz, id);
         col.Modified = true;
 
-        _urgentMode = true;
-        
+        _urgentMode = urgent;
+
         // Mark dirty all chunks in the 1-block neighborhood (including diagonals and vertical bounds)
         // so that all adjacent water vertices and face weights update instantly.
         for (int dz = -1; dz <= 1; dz++)
@@ -371,8 +377,12 @@ public class World
             MarkDirtyAt(x + dx, y + dy, z + dz);
         }
 
-        Light.OnBlockChanged(x, y, z);
+        // One water level becoming another changes the shape but not the light, so skip the light update.
+        var info = BlockRegistry.Instance.Info;
+        if (!(info[old].IsWater && info[id].IsWater)) Light.OnBlockChanged(x, y, z);
         _urgentMode = false;
+
+        _fluids.OnBlockChanged(x, y, z); // wake any water at or next to this block
     }
     
     // A light change can alter faces in a neighboring chunk too
@@ -420,11 +430,12 @@ public class World
         foreach (var chunk in _visible) chunk.DrawWater(device);
     }
 
-    // Voxel DDA (Amanatides & Woo). Water is skipped, so you can target the seabed through it.
+    // Voxel DDA (Amanatides & Woo). Water (any flow level) is skipped, so you can target the seabed through it.
     // 'hit' is the solid block; 'prev' is the empty block the ray passed through just before it.
     public bool Raycast(Vector3 origin, Vector3 dir, float maxDist,
                         out (int x, int y, int z) hit, out (int x, int y, int z) prev)
     {
+        var blockInfo = BlockRegistry.Instance.Info;
         int x = (int)MathF.Floor(origin.X);
         int y = (int)MathF.Floor(origin.Y);
         int z = (int)MathF.Floor(origin.Z);
@@ -444,7 +455,7 @@ public class World
         while (t <= maxDist)
         {
             byte b = GetBlock(x, y, z);
-            if (b != _airId && b != _waterId)
+            if (b != _airId && !blockInfo[b].IsWater)
             {
                 hit = (x, y, z);
                 return true;

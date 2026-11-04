@@ -70,7 +70,7 @@ public class DebugOverlay
             $"FPS: {_currentFps} (cap: {fpsStr})\n" +
             $"Leaves: {ChunkMesher.LeafCullDepth} | AO: {(ChunkMesher.AmbientOcclusion ? "on" : "off")}\n" +
             $"Time: {_dayNight.TimeString} | Day: {_dayNight.DayLengthSeconds:F0}s | Sky darkness: -{_dayNight.SkyDarknessLevels}{(_dayNight.Paused ? " | PAUSED" : "")}\n" +
-            $"Chunks: {_world.VisibleChunks}/{_world.TotalChunks} | Queue: {_world.PendingWork}\n" +
+            $"Chunks: {_world.VisibleChunks}/{_world.TotalChunks} | Queue: {_world.PendingWork} | Water updates: {_world.PendingFluidUpdates}\n" +
             $"XYZ: {_player.Position.X:F2} / {_player.Position.Y:F2} / {_player.Position.Z:F2}\n" +
             $"Holding: {_hotbar.SelectedName} | Music: {_audio.CurrentSongName}\n\n" +
             HighlightedBlockText();

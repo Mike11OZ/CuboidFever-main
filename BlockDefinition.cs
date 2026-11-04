@@ -21,6 +21,12 @@ public class BlockDefinition
 
     public string RenderLayer { get; set; } = "opaque";
 
+    // Fluids only. "fluid" names the kind ("water"); "fluidLevel" is Minecraft's flow value:
+    // 0 = source, 1-7 = flowing (higher = thinner, further from a source), 8 = falling.
+    // Every level of one fluid needs its own block definition (see water.json, water_flow_N.json, water_falling.json).
+    public string Fluid { get; set; }
+    public int FluidLevel { get; set; }
+
     public EmissionData Emission { get; set; } = new();
     public ColorData Tint { get; set; } = new ColorData(255, 255, 255);
 

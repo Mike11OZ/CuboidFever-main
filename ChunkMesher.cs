@@ -40,6 +40,7 @@ public static class ChunkMesher
 
     private static readonly float[] AoCurve = { 0.1f, 0.25f, 0.5f, 1.0f };
     private static readonly float[] Flat = { 1f, 1f, 1f, 1f };
+    private static readonly float[] FullTop = { 1f, 1f, 1f, 1f }; // every solid block is a full-height cube
 
     private static readonly int[,,] AoIdx = BuildAo();
 
@@ -105,10 +106,10 @@ public static class ChunkMesher
 
         public void Clear() { V.Clear(); I.Clear(); F.Clear(); W.Clear(); }
 
-        // topY = height of the block's top edge (1 = full block). Water uses WaterSurface.SurfaceHeight when open to
-        // the air above. The face index (F) and wave weight (W) streams are kept for the water vertex format;
-        // waves are off for now, so the weight is always 0.
-        public void AddFace(int f, Vector3 pos, Color color, Color skyColor, TextureRegion region, float[] ao, float topY)
+        // top[c] = height of vertex c's upper edge when that vertex is on the top of the block (1 = full block). Water
+        // passes a different height per corner so its surface slopes (see FluidCornerHeight). The face index (F) and
+        // wave weight (W) streams are kept for the water vertex format; waves are off for now, so the weight is always 0.
+        public void AddFace(int f, Vector3 pos, Color color, Color skyColor, TextureRegion region, float[] ao, float[] top)
         {
             int start = V.Count;
             for (int c = 0; c < 4; c++)
@@ -134,7 +135,7 @@ public static class ChunkMesher
 
                 float k = ao[c];
                 Vector3 vertexPos = FaceCorners[f][c] + pos;
-                if (FaceCorners[f][c].Y > 0.5f) vertexPos.Y = pos.Y + topY;
+                if (FaceCorners[f][c].Y > 0.5f) vertexPos.Y = pos.Y + top[c];
 
                 V.Add(new VertexPositionColorTextureSky(
                         vertexPos,
@@ -198,6 +199,46 @@ public static class ChunkMesher
     private static bool WaterFaceVisible(int f, in BlockInfo nb) =>
         !nb.IsWater && (f == 2 || !nb.Occludes);
 
+    // Height of the water surface at one top corner of the water block at index i (Minecraft's
+    // RenderBlocks.getFluidHeight). cx / cz are 0 or 1: which corner of the block, in X and Z.
+    //
+    // The corner is shared by four blocks (this one and the three around that corner), so the four water blocks that
+    // meet there all compute the same height and the surface has no gaps. Each water block contributes how much of it
+    // is air; sources and falling water count ten times as much, so slopes lean toward them. Air counts as fully
+    // empty, solid blocks are ignored, and water above any of the four makes the corner full height.
+    private static float FluidCornerHeight(byte[] blocks, BlockInfo[] info, int i, int cx, int cz)
+    {
+        float total = 0f;
+        int count = 0;
+
+        for (int k = 0; k < 4; k++)
+        {
+            int j = i + (cx - (k & 1)) + (cz - (k >> 1)) * P;
+
+            if (info[blocks[j + PP]].IsWater) return 1f;
+
+            ref readonly BlockInfo nb = ref info[blocks[j]];
+            if (nb.IsWater)
+            {
+                float air = WaterSurface.PercentAir(nb.FluidLevel);
+                if (nb.FluidLevel == BlockRegistry.WaterSourceLevel || nb.FluidLevel >= BlockRegistry.WaterFallingLevel)
+                {
+                    total += air * 10f;
+                    count += 10;
+                }
+                total += air;
+                count++;
+            }
+            else if (!nb.Solid)
+            {
+                total += 1f;
+                count++;
+            }
+        }
+
+        return 1f - total / count; // count > 0: the water block itself is one of the four
+    }
+
     // Picks the better lit of two cells (summed over sky + the three block light channels).
     // Water faces that border air are lit from whichever side is brighter, so a face looking into
     // a dim air pocket (or from a dim pocket into bright water) can't come out nearly black.
@@ -223,6 +264,8 @@ public static class ChunkMesher
         var registry = BlockRegistry.Instance;
         var info = registry.Info;
         var ao = new float[4];
+        var cornerHeights = new float[4]; // water: surface height at each top corner, index = cx + 2 * cz
+        var waterTop = new float[4];      // water: the same heights, arranged per vertex of the face being built
 
         for (int y = 0; y < Chunk.Size; y++)
         for (int z = 0; z < Chunk.Size; z++)
@@ -235,6 +278,7 @@ public static class ChunkMesher
 
             Builder builder = self.IsWater ? b.Water : b.Solid;
             var pos = new Vector3(ox + x, oy + y, oz + z);
+            bool cornersReady = false; // water corner heights are only worked out if a face is actually drawn
 
             for (int f = 0; f < 6; f++)
             {
@@ -256,10 +300,27 @@ public static class ChunkMesher
                     faceAo = ao;
                 }
 
-                // Water sits 1/9 below the top of its block, unless more water is on top (then it is a full block).
-                float topY = self.IsWater && !info[b.Blocks[i + PP]].IsWater
-                    ? WaterSurface.SurfaceHeight
-                    : 1f;
+                // Water's top edge is lower the thinner the flow, and each corner is averaged with the water around it
+                // (FluidCornerHeight) so neighbouring blocks line up into a smooth slope. Everything else is a full cube.
+                float[] top = FullTop;
+                if (self.IsWater)
+                {
+                    if (!cornersReady)
+                    {
+                        for (int cz = 0; cz < 2; cz++)
+                        for (int cx = 0; cx < 2; cx++)
+                            cornerHeights[cx + 2 * cz] = FluidCornerHeight(b.Blocks, info, i, cx, cz);
+                        cornersReady = true;
+                    }
+
+                    // Each vertex of this face sits at one corner of the block; pick that corner's height
+                    for (int v = 0; v < 4; v++)
+                    {
+                        Vector3 corner = FaceCorners[f][v];
+                        waterTop[v] = cornerHeights[(int)corner.X + 2 * (int)corner.Z];
+                    }
+                    top = waterTop;
+                }
 
                 // Water under a solid block is lit from its own cell; every other water face (surface, or a wall /
                 // ceiling facing air) from the brighter of the water cell and the cell it looks into.
@@ -268,7 +329,7 @@ public static class ChunkMesher
                     : BrighterCell(b.Light, i, n);
                 LightColors(in self, f, lightSample, b.Light, out var color, out var skyColor);
 
-                builder.AddFace(f, pos, color, skyColor, registry.FastRegion(id, f), faceAo, topY);
+                builder.AddFace(f, pos, color, skyColor, registry.FastRegion(id, f), faceAo, top);
             }
         }
 

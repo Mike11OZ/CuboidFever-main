@@ -1,5 +1,13 @@
 {
   "values": [
-    "cuboidfever:water"
+    "cuboidfever:water",
+    "cuboidfever:water_flow_1",
+    "cuboidfever:water_flow_2",
+    "cuboidfever:water_flow_3",
+    "cuboidfever:water_flow_4",
+    "cuboidfever:water_flow_5",
+    "cuboidfever:water_flow_6",
+    "cuboidfever:water_flow_7",
+    "cuboidfever:water_falling"
   ]
 }

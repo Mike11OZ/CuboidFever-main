@@ -13,7 +13,10 @@ public struct BlockInfo
     public int LightAttenuation;
     public bool IsAir, IsWater, IsGlass, IsLeaves;
     public float TintR, TintG, TintB;   // 0-1, used by emissive blocks
-    
+
+    // Water only (-1 for every other block): 0 = source, 1-7 = flowing, 8 = falling. Same meaning as the
+    // metadata value in Minecraft's BlockFlowing.
+    public int FluidLevel;
 }
 public sealed class BlockRegistry
 {
@@ -48,7 +51,8 @@ public sealed class BlockRegistry
                 Emissive = def.Emissive,
                 Occludes = def.Solid && !def.Transparent,
                 IsAir = name.Equals("cuboidfever:air", StringComparison.OrdinalIgnoreCase),
-                IsWater = name.Equals("cuboidfever:water", StringComparison.OrdinalIgnoreCase),
+                IsWater = string.Equals(def.Fluid, "water", StringComparison.OrdinalIgnoreCase),
+                FluidLevel = string.Equals(def.Fluid, "water", StringComparison.OrdinalIgnoreCase) ? def.FluidLevel : -1,
                 IsGlass = name.Equals("cuboidfever:glass", StringComparison.OrdinalIgnoreCase),
                 IsLeaves = name.Equals("cuboidfever:leaves", StringComparison.OrdinalIgnoreCase),
                 TintR = tint.R / 255f, TintG = tint.G / 255f, TintB = tint.B / 255f
@@ -57,6 +61,43 @@ public sealed class BlockRegistry
             for (int f = 0; f < 6; f++)
                 _faceRegions[id * 6 + f] = GetTextureRegion(id, f);
         }
+
+        BuildWaterTable();
+    }
+
+    // Water has one block per flow level, so the simulation can store a level as a plain block ID.
+    public const int WaterLevels = 9;           // 0 = source, 1-7 = flowing, 8 = falling
+    public const int WaterSourceLevel = 0;
+    public const int WaterFallingLevel = 8;
+
+    // Block ID for each water level (index = fluidLevel).
+    public readonly byte[] WaterByLevel = new byte[WaterLevels];
+    public byte WaterSource => WaterByLevel[WaterSourceLevel];
+
+    private void BuildWaterTable()
+    {
+        var seen = new bool[WaterLevels];
+
+        foreach (var (id, def) in _definitions)
+        {
+            if (!string.Equals(def.Fluid, "water", StringComparison.OrdinalIgnoreCase)) continue;
+
+            if (def.FluidLevel < 0 || def.FluidLevel >= WaterLevels)
+                throw new InvalidDataException(
+                    $"Block '{def.Name}' has invalid fluidLevel {def.FluidLevel}. Expected 0 to {WaterLevels - 1}.");
+
+            if (seen[def.FluidLevel])
+                throw new InvalidDataException(
+                    $"Block '{def.Name}' reuses water fluidLevel {def.FluidLevel}.");
+
+            seen[def.FluidLevel] = true;
+            WaterByLevel[def.FluidLevel] = id;
+        }
+
+        for (int level = 0; level < WaterLevels; level++)
+            if (!seen[level])
+                throw new InvalidDataException(
+                    $"No water block defines fluidLevel {level} (needs water.json, water_flow_1-7.json and water_falling.json).");
     }
     public static BlockRegistry Instance { get; private set; }
 
