@@ -11,9 +11,11 @@ public sealed class FeatureContext
 {
     private readonly byte[,,] _blocks; // [x, y, z]
     private readonly byte _airId;
+    private readonly Biome[,] _biomes; // [x, z], one per block column
 
-    public FeatureContext(byte[,,] blocks, int columnX, int columnZ, byte airId, Random rng)
+    public FeatureContext(byte[,,] blocks, int columnX, int columnZ, byte airId, Random rng, Biome[,] biomes)
     {
+        _biomes = biomes;
         _blocks = blocks;
         ColumnX = columnX;
         ColumnZ = columnZ;
@@ -27,6 +29,31 @@ public sealed class FeatureContext
 
     /// <summary>Deterministic per (world seed, feature, column).</summary>
     public Random Rng { get; }
+
+    /// <summary>Biome at a local (x, z) in this column.</summary>
+    public Biome BiomeAt(int x, int z) => _biomes[x, z];
+
+    /// <summary>
+    /// The standard "should I spawn here?" roll: a 1-in-<paramref name="baseOneIn"/>
+    /// chance, scaled by how common this feature is in the local biome
+    /// (see <see cref="Biome.FeatureDensity"/>). Density 0 never spawns, 1 is
+    /// the unmodified chance, 2 is twice as likely. Draws the same single
+    /// random number as the old inline roll when density is 1, so unaffected
+    /// areas keep their exact layout.
+    /// </summary>
+    public bool Roll(int x, int z, string featureName, int baseOneIn)
+    {
+        double density = _biomes[x, z].FeatureDensity(featureName);
+
+        if (density <= 0)
+            return false;
+
+        int oneIn = density == 1.0
+            ? baseOneIn
+            : Math.Max(1, (int)Math.Round(baseOneIn / density));
+
+        return Rng.Next(oneIn) == 0;
+    }
 
     public int Size => Chunk.Size;
     public int Height => World.Height;

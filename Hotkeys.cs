@@ -25,7 +25,10 @@ public sealed class Hotkeys
     {
         if (_input.WasPressed(GameAction.CycleFpsCap)) _fps.CycleNext();
         if (_input.WasPressed(GameAction.CycleWindowMode)) _windowManager.CycleNextMode();
-
+        if (_input.WasPressed(GameAction.CycleRenderDistance))
+                {
+                    _world.CycleRenderDistance();
+                }
         if (_input.WasPressed(GameAction.CycleLeafCulling))
         {
             ChunkMesher.LeafCullDepth = (ChunkMesher.LeafCullDepth + 1) % (ChunkMesher.MaxLeafDepth + 1);

@@ -90,7 +90,7 @@ public class Game1 : Game
         _hotbar = new Hotbar(blocks, _input);
         _hud = new Hud(GraphicsDevice, _sprites, atlas, _hotbar);
 
-        _world = new World(8374173);
+        _world = new World(455);
         _hotkeys = new Hotkeys(_world, _dayNight, _windowManager, _fps, _input);
         _controller = new PlayerController(_player, _world, _input);
         

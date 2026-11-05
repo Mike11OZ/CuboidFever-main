@@ -13,6 +13,9 @@ public class World
     public const int Height = ChunksY * Chunk.Size; // 128
     public const int SeaLevel = 64;
 
+    private static readonly int[] RenderDistances = { 8, 12, 16, 20, 24, 32 };
+    private int _renderDistanceIndex = 2; // Default 16 is at index 2
+
     public int LoadRadius = 16;
     private int UnloadRadius => LoadRadius + 2;
 
@@ -47,7 +50,7 @@ public class World
 
         _gen = new TerrainGenerator(seed);
         _caves = new CaveCarver(seed, BlockRegistry.Instance);
-        _features = new PlacedFeatures(seed, BlockRegistry.Instance);
+        _features = new PlacedFeatures(seed, BlockRegistry.Instance, _gen.Climate);
         Light = new LightMap(this);
         _ticks = new BlockTickScheduler(this);
         _ticks.Register(TickKind.Water, new FluidSimulator(this));
@@ -55,6 +58,14 @@ public class World
         _pool = new WorkerPool(Math.Clamp(Environment.ProcessorCount - 2, 2, 8));
         _maxGenInFlight = _pool.Count + 2;
         _maxMeshInFlight = _pool.Count * 3;
+    }
+
+    public void CycleRenderDistance()
+    {
+        _renderDistanceIndex = (_renderDistanceIndex + 1) % RenderDistances.Length;
+        LoadRadius = RenderDistances[_renderDistanceIndex];
+        _lastCenter = (int.MinValue, 0); // Forces UnloadFar to evaluate distance changes immediately
+        Console.WriteLine($"[World] Render distance cycled to: {LoadRadius} chunks");
     }
 
     public int TotalChunks => _columns.Count * ChunksY;
@@ -71,6 +82,12 @@ public class World
         if ((uint)y >= Height) return null;
         return GetColumn(x >> 4, z >> 4)?.Chunks[y >> 4];
     }
+
+    /// <summary>Biome at a world block column (computed from climate noise, so it works for unloaded terrain too).</summary>
+    public Biome GetBiomeAt(int x, int z) => _gen.Climate.GetBiome(x, z);
+
+    /// <summary>Temperature and humidity (0..1) at a world block column.</summary>
+    public (double temperature, double humidity) GetClimateAt(int x, int z) => _gen.Climate.Sample(x, z);
 
     public byte GetBlock(int x, int y, int z)
     {
@@ -251,7 +268,7 @@ public class World
         foreach (var c in _urgent)
         {
             if (c.Unloaded) continue;
-            var m = ChunkMesher.Build(c, Neighborhood(c.CX, c.CZ), c.Version);
+            var m = ChunkMesher.Build(c, Neighborhood(c.CX, c.CZ), c.Version, _gen.Climate);
             c.ApplyMesh(device, m);
             c.AppliedVersion = m.Version;
         }
@@ -297,7 +314,7 @@ public class World
 
             _pending.Remove(chunk);
             _inFlight.Add(chunk);
-            _pool.Enqueue(() => _meshed.Enqueue(ChunkMesher.Build(chunk, cols, version)));
+            _pool.Enqueue(() => _meshed.Enqueue(ChunkMesher.Build(chunk, cols, version, _gen.Climate)));
         }
     }
 

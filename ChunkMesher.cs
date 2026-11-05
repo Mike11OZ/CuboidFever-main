@@ -167,15 +167,12 @@ public static class ChunkMesher
 
             Vector3[][] diagonalPairs = new Vector3[][]
             {
-                // Plane 1: (0.15, 0, 0.15) to (0.85, 1, 0.85)
                 new Vector3[] { new(0.15f, 0f, 0.15f), new(0.15f, 1f, 0.15f), new(0.85f, 1f, 0.85f), new(0.85f, 0f, 0.85f) },
-                // Plane 2: (0.15, 0, 0.85) to (0.85, 1, 0.15)
                 new Vector3[] { new(0.15f, 0f, 0.85f), new(0.15f, 1f, 0.85f), new(0.85f, 1f, 0.15f), new(0.85f, 0f, 0.15f) }
             };
 
             foreach (var quad in diagonalPairs)
             {
-                // Front face
                 int start = V.Count;
                 for (int c = 0; c < 4; c++) { F.Add(0); W.Add(0f); }
 
@@ -191,7 +188,6 @@ public static class ChunkMesher
                 I.Add(start);     I.Add(start + 1); I.Add(start + 2);
                 I.Add(start);     I.Add(start + 2); I.Add(start + 3);
 
-                // Back face (reverse winding)
                 int startRev = V.Count;
                 for (int c = 0; c < 4; c++) { F.Add(0); W.Add(0f); }
 
@@ -215,6 +211,8 @@ public static class ChunkMesher
         public readonly byte[] Blocks = new byte[PCount];
         public readonly byte[][] Light = { new byte[PCount], new byte[PCount], new byte[PCount], new byte[PCount] };
         public readonly Builder Solid = new(), Water = new();
+        public readonly Vector3[] GrassTint = new Vector3[Chunk.Size * Chunk.Size];
+        public readonly Vector3[] FoliageTint = new Vector3[Chunk.Size * Chunk.Size];
     }
 
     [ThreadStatic] private static Buffers _buf;
@@ -288,7 +286,7 @@ public static class ChunkMesher
         return w > a ? waterCell : airCell;
     }
 
-    public static MeshData Build(Chunk chunk, Column[] cols, int version)
+    public static MeshData Build(Chunk chunk, Column[] cols, int version, ClimateMap climate)
     {
         var result = new MeshData { Chunk = chunk, Version = version };
         if (chunk.IsEmpty) return result;
@@ -305,6 +303,7 @@ public static class ChunkMesher
         var ao = new float[4];
         var cornerHeights = new float[4];
         var waterTop = new float[4];
+        bool tintsReady = false;
 
         for (int y = 0; y < Chunk.Size; y++)
         for (int z = 0; z < Chunk.Size; z++)
@@ -318,10 +317,22 @@ public static class ChunkMesher
             Builder builder = self.IsWater ? b.Water : b.Solid;
             var pos = new Vector3(ox + x, oy + y, oz + z);
 
-            // Handle cross/X-pane model blocks (flowers, tall grass, etc.)
+            Vector3 tintMul = Vector3.One;
+            if (self.BiomeTint != BiomeTintKind.None)
+            {
+                if (!tintsReady)
+                {
+                    FillTints(climate, ox, oz, b);
+                    tintsReady = true;
+                }
+
+                int ci = z * Chunk.Size + x;
+                tintMul = self.BiomeTint == BiomeTintKind.Grass ? b.GrassTint[ci] : b.FoliageTint[ci];
+            }
+
             if (self.IsCross)
             {
-                LightColors(in self, 2, i, b.Light, out var crossColor, out var crossSkyColor);
+                LightColors(in self, 2, i, b.Light, tintMul, out var crossColor, out var crossSkyColor);
                 builder.AddCross(pos, crossColor, crossSkyColor, registry.FastRegion(id, 2));
                 continue;
             }
@@ -370,7 +381,8 @@ public static class ChunkMesher
                 int lightSample = !self.IsWater ? n
                     : f == 2 && info[nbId].Occludes ? i
                     : BrighterCell(b.Light, i, n);
-                LightColors(in self, f, lightSample, b.Light, out var color, out var skyColor);
+                Vector3 faceTint = self.BiomeTint == BiomeTintKind.Grass && f == 3 ? Vector3.One : tintMul;
+                LightColors(in self, f, lightSample, b.Light, faceTint, out var color, out var skyColor);
 
                 builder.AddFace(f, pos, color, skyColor, registry.FastRegion(id, f), faceAo, top);
             }
@@ -391,6 +403,17 @@ public static class ChunkMesher
         }
 
         return result;
+    }
+
+    private static void FillTints(ClimateMap climate, int ox, int oz, Buffers b)
+    {
+        for (int z = 0; z < Chunk.Size; z++)
+        for (int x = 0; x < Chunk.Size; x++)
+        {
+            climate.GetTints(ox + x, oz + z, out var grass, out var foliage);
+            b.GrassTint[z * Chunk.Size + x] = grass;
+            b.FoliageTint[z * Chunk.Size + x] = foliage;
+        }
     }
 
     private static void Snapshot(Chunk c, Column[] cols, Buffers b)
@@ -449,7 +472,7 @@ public static class ChunkMesher
         }
     }
 
-    private static void LightColors(in BlockInfo self, int face, int n, byte[][] light,
+    private static void LightColors(in BlockInfo self, int face, int n, byte[][] light, Vector3 tint,
                                      out Color block, out Color sky)
     {
         if (self.Emissive)
@@ -463,15 +486,15 @@ public static class ChunkMesher
         float s = Chunk.Curve[light[0][n]];
 
         block = new Color(
-            Chunk.Curve[light[1][n]] * shade * self.TintR,
-            Chunk.Curve[light[2][n]] * shade * self.TintG,
-            Chunk.Curve[light[3][n]] * shade * self.TintB,
+            Chunk.Curve[light[1][n]] * shade * self.TintR * tint.X,
+            Chunk.Curve[light[2][n]] * shade * self.TintG * tint.Y,
+            Chunk.Curve[light[3][n]] * shade * self.TintB * tint.Z,
             1f);
 
         sky = new Color(
-            s * shade * self.TintR,
-            s * shade * self.TintG,
-            s * shade * self.TintB,
+            s * shade * self.TintR * tint.X,
+            s * shade * self.TintG * tint.Y,
+            s * shade * self.TintB * tint.Z,
             1f);
     }
 }

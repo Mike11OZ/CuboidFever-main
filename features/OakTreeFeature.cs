@@ -13,8 +13,8 @@ public sealed class OakTreeFeature : Feature
     private const int SpawnOneIn = 64;        // 1-in-N chance per eligible grass cell
     private const int MinTrunkHeight = 5;
     private const int TrunkHeightVariance = 3; // trunk = Min + [0, Variance)
-    private const int LowerCrownRadius = 2;
-    private const int UpperCrownRadius = 1;
+    private const int LowerCrownRadius = 3;
+    private const int UpperCrownRadius = 2;
 
     private readonly byte _grassId;
     private readonly byte _logId;
@@ -44,7 +44,7 @@ public sealed class OakTreeFeature : Feature
         for (int x = min; x < max; x++)
         for (int z = min; z < max; z++)
         {
-            if (rng.Next(SpawnOneIn) != 0)
+            if (!ctx.Roll(x, z, Name, SpawnOneIn))
                 continue;
 
             int y = ctx.SurfaceY(x, z);

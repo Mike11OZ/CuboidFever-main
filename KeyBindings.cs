@@ -31,6 +31,7 @@ public sealed class KeyBindings
         [GameAction.ScrubTimeBack]    = Keys.OemComma,
         [GameAction.ScrubTimeForward] = Keys.OemPeriod,
         [GameAction.ToggleDebugOverlay] = Keys.F3,
+        [GameAction.CycleRenderDistance] = Keys.R,
 
         [GameAction.Quit] = Keys.Escape,
     };

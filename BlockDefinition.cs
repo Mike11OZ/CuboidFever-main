@@ -19,7 +19,7 @@ public class BlockDefinition
     public bool FullBlock { get; set; } = true;
 
     public string RenderLayer { get; set; } = "opaque";
-    public string RenderType { get; set; } = "cube"; // <-- Add this: "cube" or "cross"
+    public string RenderType { get; set; } = "cube";
 
     public string Fluid { get; set; }
     public int FluidLevel { get; set; }
@@ -29,6 +29,9 @@ public class BlockDefinition
 
     public EmissionData Emission { get; set; } = new();
     public ColorData Tint { get; set; } = new ColorData(255, 255, 255);
+
+    // "grass" or "foliage": also multiply the tint by the local climate's colour
+    public string BiomeTint { get; set; } = "";
 
     public string Texture { get; set; }
     public Dictionary<string, string> Textures { get; set; } = new();

@@ -8,6 +8,7 @@
   "renderLayer": "transparent",
   "lightAttenuation": 0,
   "tint": [120, 185, 90],
+  "biomeTint": "grass",
   "textures": {
     "all": "cuboidfever:tall_grass"
   }

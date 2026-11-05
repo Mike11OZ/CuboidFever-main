@@ -68,8 +68,9 @@ public class DebugOverlay
             $"FPS: {_currentFps} (cap: {fpsStr})\n" +
             $"Leaves: {ChunkMesher.LeafCullDepth} | AO: {(ChunkMesher.AmbientOcclusion ? "on" : "off")}\n" +
             $"Time: {_dayNight.TimeString} | Day: {_dayNight.DayLengthSeconds:F0}s | Sky darkness: -{_dayNight.SkyDarknessLevels}{(_dayNight.Paused ? " | PAUSED" : "")}\n" +
-            $"Chunks: {_world.VisibleChunks}/{_world.TotalChunks} | Queue: {_world.PendingWork} | Block updates: {_world.PendingBlockUpdates}\n" +
+            $"Distance: {_world.LoadRadius} | Chunks: {_world.VisibleChunks}/{_world.TotalChunks} |Queue: {_world.PendingWork} | Block updates: {_world.PendingBlockUpdates}\n" +
             $"XYZ: {_player.Position.X:F2} / {_player.Position.Y:F2} / {_player.Position.Z:F2}\n" +
+            BiomeText() +
             $"Holding: {_hotbar.SelectedName} | Music: {_audio.CurrentSongName}\n\n" +
             HighlightedBlockText();
 
@@ -77,6 +78,15 @@ public class DebugOverlay
         _sprites.DrawString(_font, debugText, new Vector2(11, 11), Color.Black);
         _sprites.DrawString(_font, debugText, new Vector2(10, 10), Color.White);
         _sprites.End();
+    }
+
+    private string BiomeText()
+    {
+        int x = (int)System.Math.Floor(_player.Position.X);
+        int z = (int)System.Math.Floor(_player.Position.Z);
+        var (temp, humid) = _world.GetClimateAt(x, z);
+
+        return $"Biome: {_world.GetBiomeAt(x, z)} | Temp: {temp:F2} | Humidity: {humid:F2} | Hilliness: {ClimateMap.Hilliness(temp, humid):F2}\n";
     }
 
     private string HighlightedBlockText()

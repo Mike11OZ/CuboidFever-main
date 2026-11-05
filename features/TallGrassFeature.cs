@@ -27,7 +27,7 @@ public sealed class TallGrassFeature : Feature
         for (int x = 0; x < ctx.Size; x++)
         for (int z = 0; z < ctx.Size; z++)
         {
-            if (rng.Next(SpawnOneIn) != 0)
+            if (!ctx.Roll(x, z, Name, SpawnOneIn))
                 continue;
 
             int groundY = ctx.SurfaceY(x, z);

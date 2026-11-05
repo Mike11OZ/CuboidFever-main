@@ -12,6 +12,7 @@
     "b": 0
   },
   "tint": [100, 180, 70],
+  "biomeTint": "foliage",
   "renderLayer": "cutout",
   "textures": {
     "all": "cuboidfever:leaves"

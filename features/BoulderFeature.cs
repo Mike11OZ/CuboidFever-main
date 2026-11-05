@@ -34,7 +34,7 @@ public abstract class Boulder : Feature
         for (int x = MaxRadius; x < ctx.Size - MaxRadius; x++)
         for (int z = MaxRadius; z < ctx.Size - MaxRadius; z++)
         {
-            if (rng.Next(SpawnOneIn) != 0)
+            if (!ctx.Roll(x, z, Name, SpawnOneIn))
                 continue;
 
             int groundY = ctx.TerrainSurfaceY(

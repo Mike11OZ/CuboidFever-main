@@ -21,8 +21,8 @@ public sealed class BigPineTreeFeature : Feature
     public BigPineTreeFeature(BlockRegistry blocks)
     {
         _grassId = blocks.GetId("cuboidfever:grass");
-        _logId = blocks.GetId("cuboidfever:log");
-        _leavesId = blocks.GetId("cuboidfever:leaves");
+        _logId = blocks.GetId("cuboidfever:pine_log");
+        _leavesId = blocks.GetId("cuboidfever:pine_needles");
     }
 
     public override string Name => "big_pine_tree";
@@ -36,7 +36,7 @@ public sealed class BigPineTreeFeature : Feature
         for (int x = MaxCrownRadius; x < ctx.Size - MaxCrownRadius; x++)
         for (int z = MaxCrownRadius; z < ctx.Size - MaxCrownRadius; z++)
         {
-            if (rng.Next(SpawnOneIn) != 0)
+            if (!ctx.Roll(x, z, Name, SpawnOneIn))
                 continue;
 
             int groundY = ctx.SurfaceY(x, z);

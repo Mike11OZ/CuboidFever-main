@@ -1,4 +1,3 @@
-
 using System;
 
 namespace CuboidFever;
@@ -15,23 +14,32 @@ public class TerrainGenerator
     private readonly byte _bedrockId;
 
     // ---- Tunables (tweak these while you experiment) ----
-    private const double BaseHeight = 0.40;
+    private const double BaseHeight = 0.2;
     private const double DepthInfluence = 2.0;
     private const double Roughness = 1.0;
     // Keep at least 32 blocks of vertical building space above terrain.
     private const int TerrainBuildHeightBuffer = 32;
 
     // Begin reducing terrain elevations this far below the hard cap.
-    private const int HighAltitudeFadeDepth = 48;
+    private const int HighAltitudeFadeDepth = 8;
     // Continentalness configuration
     private const int ContinentalNoiseOctaves = 4;
-    private const double ContinentalNoiseScale = 3000.0;
-    private const double ContinentalHeightInfluence = 0.5;
+    private const double ContinentalNoiseScale = 600.0;
+    private const double ContinentalNormalize = 5.0; // new: tames the raw noise to roughly ±1
+    private const double ContinentalHeightInfluence = 0.7;
+
+    // How much of the normal terrain roughness the coldest/driest climates keep.
+    // Warm, wet climates always keep 100% (your original terrain).
+    // 1.0 = climate has no effect on roughness, 0.5 = flattest areas are half as rough.
+    private const double ClimateFlatFloor = 0.5;
 
     private const double NoiseScale = 684.412;
     private const int GX = 5, GY = 17, GZ = 5;
 
     private readonly int _seed;
+
+    /// <summary>Temperature/humidity maps and the biome lookup built on them.</summary>
+    public ClimateMap Climate { get; }
 
     private readonly OctaveNoise _low, _high, _select, _sandNoise,
         _stoneDepth, _scale2D, _depth2D, _continentalNoise;
@@ -61,6 +69,10 @@ public class TerrainGenerator
         _scale2D = new OctaveNoise(r, 10);
         _depth2D = new OctaveNoise(r, 16);
         _continentalNoise = new OctaveNoise(r, ContinentalNoiseOctaves);
+
+        // Built after all the Random draws above, with its own seeds, so it
+        // can't shift the existing terrain noise.
+        Climate = new ClimateMap(seed, blocks);
     }
 
     public void GenerateColumn(int cx, int cz, byte[,,] col)
@@ -96,12 +108,18 @@ public class TerrainGenerator
             double continentalness = _continentalNoise.Sample(
                 cellX * 4 / ContinentalNoiseScale,
                 0,
-                cellZ * 4 / ContinentalNoiseScale);
+                cellZ * 4 / ContinentalNoiseScale) / ContinentalNormalize;
 
-            double variation =
+            // Your original roughness term, unchanged.
+            double baseVariation =
                 Math.Clamp(
                     (scaleN + 256) / 512 * Roughness,
                     0, 1) * 0.9 + 0.1;
+
+            // Cold and dry regions get flatter terrain. Warm, wet regions
+            // (hilliness near 1) keep the original roughness exactly.
+            double hilliness = Climate.Hilliness((int)(cellX * 4), (int)(cellZ * 4));
+            double variation = baseVariation * Lerp(hilliness, ClimateFlatFloor, 1.0);
 
             // Height offset now incorporates continental noise safely
             double heightOffset =
@@ -300,8 +318,10 @@ public class TerrainGenerator
                 3.0 +
                 rng.NextDouble() * 0.25);
 
+            var biome = Climate.GetBiome(wx, wz);
+
             int run = -1;
-            byte filler = _dirtId;
+            byte filler = biome.FillerBlock;
 
             for (int y = World.Height - 1; y >= 0; y--)
             {
@@ -326,8 +346,8 @@ public class TerrainGenerator
                 // First stone below air or water is the surface.
                 if (run == -1)
                 {
-                    byte top = _grassId;
-                    filler = _dirtId;
+                    byte top = biome.TopBlock;
+                    filler = biome.FillerBlock;
 
                     if (stoneDepth <= 0)
                     {

@@ -7,12 +7,15 @@ using Microsoft.Xna.Framework;
 
 namespace CuboidFever;
 
+public enum BiomeTintKind : byte { None, Grass, Foliage }
+
 public struct BlockInfo
 {
     public bool Transparent, Solid, FullBlock, Emissive, Occludes, IsCross;
     public int LightAttenuation;
     public bool IsAir, IsWater, IsGlass, IsLeaves;
     public float TintR, TintG, TintB;
+    public BiomeTintKind BiomeTint;
 
     public int FluidLevel;
 
@@ -61,7 +64,13 @@ public sealed class BlockRegistry
                 Tick = isWater ? TickKind.Water : def.Gravity ? TickKind.Gravity : TickKind.None,
                 IsGlass = name.Equals("cuboidfever:glass", StringComparison.OrdinalIgnoreCase),
                 IsLeaves = name.Equals("cuboidfever:leaves", StringComparison.OrdinalIgnoreCase),
-                TintR = tint.R / 255f, TintG = tint.G / 255f, TintB = tint.B / 255f
+                TintR = tint.R / 255f, TintG = tint.G / 255f, TintB = tint.B / 255f,
+                BiomeTint = (def.BiomeTint ?? "").ToLowerInvariant() switch
+                {
+                    "grass" => BiomeTintKind.Grass,
+                    "foliage" => BiomeTintKind.Foliage,
+                    _ => BiomeTintKind.None
+                }
             };
             for (int f = 0; f < 6; f++)
                 _faceRegions[id * 6 + f] = GetTextureRegion(id, f);
@@ -87,7 +96,7 @@ public sealed class BlockRegistry
 
             if (def.FluidLevel < 0 || def.FluidLevel >= WaterLevels)
                 throw new InvalidDataException(
-                    $"Block '{def.Name}' has invalid fluidLevel {def.FluidLevel}. Expected 0 to {WaterLevels - 1}.");
+                    $"Block '{def.Name}' has invalid fluidLevel {def.FluidLevel}. Expected 0 to {WaterLevels}.");
 
             if (seen[def.FluidLevel])
                 throw new InvalidDataException(

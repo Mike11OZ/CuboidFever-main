@@ -20,11 +20,13 @@ public sealed class PlacedFeatures
 {
     private readonly int _seed;
     private readonly byte _airId;
+    private readonly ClimateMap _climate;
     private readonly Feature[] _features;
 
-    public PlacedFeatures(int seed, BlockRegistry blocks)
+    public PlacedFeatures(int seed, BlockRegistry blocks, ClimateMap climate)
     {
         _seed = seed;
+        _climate = climate;
         _airId = blocks.GetId("cuboidfever:air");
 
         // Registration order is generation order. To add a feature: create its
@@ -47,6 +49,12 @@ public sealed class PlacedFeatures
 
     public void Generate(int columnX, int columnZ, byte[,,] column)
     {
+        // Look up every column's biome once, not once per feature.
+        var biomes = new Biome[Chunk.Size, Chunk.Size];
+        for (int x = 0; x < Chunk.Size; x++)
+        for (int z = 0; z < Chunk.Size; z++)
+            biomes[x, z] = _climate.GetBiome(columnX * Chunk.Size + x, columnZ * Chunk.Size + z);
+
         foreach (var feature in _features)
         {
             // Each feature gets its own random stream, so adding or removing
@@ -56,7 +64,7 @@ public sealed class PlacedFeatures
                 (columnX * 73856093) ^
                 (columnZ * 19349663)));
 
-            feature.Generate(new FeatureContext(column, columnX, columnZ, _airId, rng));
+            feature.Generate(new FeatureContext(column, columnX, columnZ, _airId, rng, biomes));
         }
     }
 

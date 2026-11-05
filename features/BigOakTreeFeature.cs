@@ -61,7 +61,7 @@ public sealed class BigOakTreeFeature : Feature
         for (int x = min; x < max; x++)
         for (int z = min; z < max; z++)
         {
-            if (rng.Next(SpawnOneIn) != 0)
+            if (!ctx.Roll(x, z, Name, SpawnOneIn))
                 continue;
 
             int groundY = ctx.SurfaceY(x, z);
