@@ -20,7 +20,6 @@ public sealed class BigOakTreeFeature : Feature
     private const int MinTrunkHeight = 10;
     private const int TrunkHeightVariance = 2;
 
-    // The trunk is two blocks wide in both horizontal directions.
     private const int TrunkWidth = 1;
 
     // Maximum radius of a foliage cluster.

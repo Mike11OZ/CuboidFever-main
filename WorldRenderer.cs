@@ -1,5 +1,3 @@
-using System;
-using System.IO;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 
@@ -9,7 +7,7 @@ namespace CuboidFever;
 // It owns the camera projection and the effects used to draw them.
 public sealed class WorldRenderer
 {
-    private const float FovDegrees = 70f;
+    private const float FovDegrees = 80f;
     private const float NearPlane = 0.1f;
     private const float FarPlane = 500f;
 

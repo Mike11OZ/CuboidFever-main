@@ -32,6 +32,7 @@ public sealed class KeyBindings
         [GameAction.ScrubTimeForward] = Keys.OemPeriod,
         [GameAction.ToggleDebugOverlay] = Keys.F3,
         [GameAction.CycleRenderDistance] = Keys.R,
+        [GameAction.Screenshot] = Keys.F12,
 
         [GameAction.Quit] = Keys.Escape,
     };

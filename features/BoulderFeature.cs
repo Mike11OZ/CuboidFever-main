@@ -51,7 +51,7 @@ public abstract class Boulder : Feature
     }
 
     private void PlaceBoulder(
-        FeatureContext ctx, int x, int groundY, int z, Random rng)
+        FeatureContext ctx, int x, int groundY, int z, DeterministicRandom rng)
     {
         TryPavedPlacement(ctx, x, groundY - 1, z, rng);
 
@@ -103,7 +103,8 @@ public abstract class Boulder : Feature
         }
     }
 
-    private void TryPavedPlacement(FeatureContext ctx, int x, int y, int z, Random rng)
+    private void TryPavedPlacement(
+        FeatureContext ctx, int x, int y, int z, DeterministicRandom rng)
     {
         bool useRockVariant = rng.Next(100) < 8;
         byte targetBlock = useRockVariant ? _rockId : _stoneId;

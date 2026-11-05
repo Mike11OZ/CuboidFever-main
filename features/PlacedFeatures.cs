@@ -57,12 +57,11 @@ public sealed class PlacedFeatures
 
         foreach (var feature in _features)
         {
-            // Each feature gets its own random stream, so adding or removing
-            // one never shifts where the others place things.
-            var rng = new Random(unchecked(
-                _seed ^ feature.Salt ^
-                (columnX * 73856093) ^
-                (columnZ * 19349663)));
+            var rng = DeterministicRandom.ForFeature(
+                _seed,
+                feature.Salt,
+                columnX,
+                columnZ);
 
             feature.Generate(new FeatureContext(column, columnX, columnZ, _airId, rng, biomes));
         }

@@ -63,17 +63,24 @@ public class OctaveNoise
 
     public OctaveNoise(Random rng, int octaves)
     {
+        ArgumentNullException.ThrowIfNull(rng);
+
+        if (octaves <= 0)
+            throw new ArgumentOutOfRangeException(nameof(octaves));
+
         _octaves = new PerlinNoise[octaves];
-        for (int i = 0; i < octaves; i++) _octaves[i] = new PerlinNoise(rng);
+
+        for (int i = 0; i < octaves; i++)
+            _octaves[i] = new PerlinNoise(rng);
     }
 
     public double Sample(double x, double y, double z)
     {
         double sum = 0, f = 1;
-        foreach (var o in _octaves)
+        for (int i = 0; i < _octaves.Length; i++)
         {
-            sum += o.Noise(x * f, y * f, z * f) / f;
-            f /= 2;
+            sum += _octaves[i].Noise(x * f, y * f, z * f) / f;
+            f *= 0.5;
         }
         return sum;
     }

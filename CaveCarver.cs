@@ -68,7 +68,9 @@ public sealed class CaveCarver
         _stone = stone;
         _dirt = dirt;
         _grass = grass;
-        _isWater = isWater;
+        _isWater = isWater != null
+            ? (bool[])isWater.Clone()
+            : throw new ArgumentNullException(nameof(isWater));
     }
 
     private static bool[] WaterTable(BlockRegistry blocks)

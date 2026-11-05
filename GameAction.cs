@@ -14,7 +14,7 @@ public enum GameAction
     // Toggles and debug
     ToggleFly, CycleFpsCap, CycleWindowMode, CycleLeafCulling, ToggleAo,
     PauseTime, ScrubTimeBack, ScrubTimeForward,
-    ToggleDebugOverlay, CycleRenderDistance,
+    ToggleDebugOverlay, CycleRenderDistance, Screenshot,
 
     // Application
     Quit,

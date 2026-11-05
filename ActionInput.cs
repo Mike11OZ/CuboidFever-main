@@ -1,3 +1,4 @@
+using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Input;
 
 namespace CuboidFever;
@@ -16,6 +17,15 @@ public sealed class ActionInput
 
     // How far the mouse wheel moved since the last frame (positive = scrolled up).
     public int ScrollDelta => _mouse.ScrollWheelValue - _prevMouse.ScrollWheelValue;
+
+    // Cursor position in window coordinates. Only meaningful while the mouse is not captured
+    // (InputManager.SetMouseCaptured(false)), i.e. in menus.
+    public Point MousePosition => _mouse.Position;
+
+    // True only on the frame the left button goes from up to down. Menus use this directly rather than
+    // a GameAction, since clicking a button isn't something the player can rebind.
+    public bool WasLeftClicked =>
+        _mouse.LeftButton == ButtonState.Pressed && _prevMouse.LeftButton != ButtonState.Pressed;
 
     // Call exactly once per frame, at the top of Game1.Update.
     public void Update(KeyboardState kb, MouseState mouse)

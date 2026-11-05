@@ -1,3 +1,5 @@
+using System;
+using System.Diagnostics;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 
@@ -22,6 +24,12 @@ public class DebugOverlay
     private double _lastFpsTime;
     private int _currentFps;
 
+    // CPU and RAM tracking fields
+    private readonly Process _currentProcess;
+    private TimeSpan _lastCpuTime;
+    private double _cpuUsagePercent;
+    private long _memoryMb;
+
     public bool IsVisible => _isVisible;
 
     public DebugOverlay(SpriteFont font, SpriteBatch sprites, ActionInput input, World world, Player player,
@@ -39,19 +47,44 @@ public class DebugOverlay
         _dayNight = dayNight;
         _audio = audio;
         _interaction = interaction;
+
+        _currentProcess = Process.GetCurrentProcess();
+        _lastCpuTime = _currentProcess.TotalProcessorTime;
     }
 
-    public void Update(GameTime gameTime)
+    public void Update()
     {
         if (_input.WasPressed(GameAction.ToggleDebugOverlay))
             _isVisible = !_isVisible;
+    }
 
+    public void UpdateFps(GameTime gameTime)
+    {
         _frames++;
-        if (gameTime.TotalGameTime.TotalSeconds - _lastFpsTime >= 1.0)
+
+        double currentTime = gameTime.TotalGameTime.TotalSeconds;
+        double elapsed = currentTime - _lastFpsTime;
+
+        if (elapsed >= 1.0)
         {
-            _currentFps = _frames;
+            _currentFps = (int)Math.Round(_frames / elapsed);
             _frames = 0;
-            _lastFpsTime = gameTime.TotalGameTime.TotalSeconds;
+            _lastFpsTime = currentTime;
+
+            // Update CPU and RAM metrics once per second alongside the FPS calculation
+            _currentProcess.Refresh();
+            _memoryMb = _currentProcess.WorkingSet64 / (1024 * 1024);
+
+            TimeSpan currentCpuTime = _currentProcess.TotalProcessorTime;
+            double cpuTimeDelta = (currentCpuTime - _lastCpuTime).TotalMilliseconds;
+            double realTimeDelta = elapsed * 1000.0;
+
+            if (realTimeDelta > 0)
+            {
+                _cpuUsagePercent = (cpuTimeDelta / (realTimeDelta * Environment.ProcessorCount)) * 100.0;
+            }
+
+            _lastCpuTime = currentCpuTime;
         }
     }
 
@@ -64,11 +97,12 @@ public class DebugOverlay
 
         string debugText =
             $"{GameInfo.FullTitle}\n" +
-            $"Display: {_windowManager.CurrentMode} ({_windowManager.Width}x{_windowManager.Height})\n" +
-            $"FPS: {_currentFps} (cap: {fpsStr})\n" +
+            $"Display: {_windowManager.CurrentMode} ({_windowManager.Width}x{_windowManager.Height}) | " +
+            $"Viewport: {_windowManager.ViewportWidth}x{_windowManager.ViewportHeight} ({_windowManager.ViewportAspectRatio:F4})\n" +
+            $"FPS: {_currentFps} (cap: {fpsStr}) | CPU: {_cpuUsagePercent:F1}% | RAM: {_memoryMb} MB\n" +
             $"Leaves: {ChunkMesher.LeafCullDepth} | AO: {(ChunkMesher.AmbientOcclusion ? "on" : "off")}\n" +
             $"Time: {_dayNight.TimeString} | Day: {_dayNight.DayLengthSeconds:F0}s | Sky darkness: -{_dayNight.SkyDarknessLevels}{(_dayNight.Paused ? " | PAUSED" : "")}\n" +
-            $"Distance: {_world.LoadRadius} | Chunks: {_world.VisibleChunks}/{_world.TotalChunks} |Queue: {_world.PendingWork} | Block updates: {_world.PendingBlockUpdates}\n" +
+            $"Distance: {_world.LoadRadius} | Chunks: {_world.VisibleChunks}/{_world.TotalChunks} | Queue: {_world.PendingWork} | Block updates: {_world.PendingBlockUpdates}\n" +
             $"XYZ: {_player.Position.X:F2} / {_player.Position.Y:F2} / {_player.Position.Z:F2}\n" +
             BiomeText() +
             $"Holding: {_hotbar.SelectedName} | Music: {_audio.CurrentSongName}\n\n" +

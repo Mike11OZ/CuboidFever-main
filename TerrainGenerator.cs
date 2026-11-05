@@ -1,3 +1,4 @@
+
 using System;
 
 namespace CuboidFever;
@@ -8,225 +9,86 @@ public class TerrainGenerator
     private readonly byte _airId;
     private readonly byte _stoneId;
     private readonly byte _waterId;
-    private readonly byte _grassId;
-    private readonly byte _dirtId;
-    private readonly byte _sandId;
-    private readonly byte _bedrockId;
 
-    // ---- Tunables (tweak these while you experiment) ----
-    private const double BaseHeight = 0.2;
-    private const double DepthInfluence = 2.0;
-    private const double Roughness = 1.0;
-    // Keep at least 16 blocks of vertical building space above terrain.
     private const int TerrainBuildHeightBuffer = 16;
 
-    // Begin reducing terrain elevations this far below the hard cap.
-    private const int HighAltitudeFadeDepth = 8;
-    // Continentalness configuration
-    private const int ContinentalNoiseOctaves = 4;
-    private const double ContinentalNoiseScale = 600.0;
-    private const double ContinentalNormalize = 5.0; // new: tames the raw noise to roughly ±1
-    private const double ContinentalHeightInfluence = 0.7;
-
-    // How much of the normal terrain roughness the coldest/driest climates keep.
-    // Warm, wet climates always keep 100% (your original terrain).
-    // 1.0 = climate has no effect on roughness, 0.5 = flattest areas are half as rough.
-    private const double ClimateFlatFloor = 0.5;
-
-    private const double NoiseScale = 684.412;
-    private const int GX = 5, GY = 17, GZ = 5;
-
-    private readonly int _seed;
+    private readonly TerrainDensityGenerator _densityGenerator;
+    private readonly TerrainSurfaceGenerator _surfaceGenerator;
 
     /// <summary>Temperature/humidity maps and the biome lookup built on them.</summary>
     public ClimateMap Climate { get; }
 
-    private readonly OctaveNoise _low, _high, _select, _sandNoise,
-        _stoneDepth, _scale2D, _depth2D, _continentalNoise;
-
     public TerrainGenerator(int seed)
     {
-        _seed = seed;
-
         // BlockRegistry must be initialized before creating the world.
         var blocks = BlockRegistry.Instance;
 
         _airId = blocks.GetId("cuboidfever:air");
         _stoneId = blocks.GetId("cuboidfever:stone");
         _waterId = blocks.GetId("cuboidfever:water");
-        _grassId = blocks.GetId("cuboidfever:grass");
-        _dirtId = blocks.GetId("cuboidfever:dirt");
-        _sandId = blocks.GetId("cuboidfever:sand");
-        _bedrockId = blocks.GetId("cuboidfever:dragon_stone");
 
+        // Preserve the original noise initialization order.
+        // Changing this order changes the generated terrain.
         var r = new Random(seed);
 
-        _low = new OctaveNoise(r, 16);
-        _high = new OctaveNoise(r, 16);
-        _select = new OctaveNoise(r, 8);
-        _sandNoise = new OctaveNoise(r, 4);
-        _stoneDepth = new OctaveNoise(r, 4);
-        _scale2D = new OctaveNoise(r, 10);
-        _depth2D = new OctaveNoise(r, 16);
-        _continentalNoise = new OctaveNoise(r, ContinentalNoiseOctaves);
+        var low = new OctaveNoise(r, 16);
+        var high = new OctaveNoise(r, 16);
+        var select = new OctaveNoise(r, 8);
 
-        // Built after all the Random draws above, with its own seeds, so it
-        // can't shift the existing terrain noise.
+        var sandNoise = new OctaveNoise(r, 4);
+        var stoneDepth = new OctaveNoise(r, 4);
+
+        var scale2D = new OctaveNoise(r, 10);
+        var depth2D = new OctaveNoise(r, 16);
+        var continentalNoise = new OctaveNoise(r, 4);
+
+        // Climate is constructed after the noise generators.
         Climate = new ClimateMap(seed, blocks);
+
+        _densityGenerator = new TerrainDensityGenerator(
+            Climate,
+            low,
+            high,
+            select,
+            scale2D,
+            depth2D,
+            continentalNoise);
+
+        _surfaceGenerator = new TerrainSurfaceGenerator(
+            seed,
+            _airId,
+            _stoneId,
+            _waterId,
+            blocks.GetId("cuboidfever:sand"),
+            blocks.GetId("cuboidfever:dragon_stone"),
+            sandNoise,
+            stoneDepth,
+            Climate);
     }
 
     public void GenerateColumn(int cx, int cz, byte[,,] col)
     {
-        var density = BuildDensityLattice(cx, cz);
+        ArgumentNullException.ThrowIfNull(col);
+
+        if (col.GetLength(0) != 16 ||
+            col.GetLength(1) != World.Height ||
+            col.GetLength(2) != 16)
+        {
+            throw new ArgumentException(
+                "Column dimensions do not match world dimensions.",
+                nameof(col));
+        }
+
+        var density = _densityGenerator.Generate(cx, cz);
 
         FillFromDensity(density, col);
-        SurfacePass(cx, cz, col);
-    }
-
-    private double[,,] BuildDensityLattice(int cx, int cz)
-    {
-        var d = new double[GX, GY, GZ];
-
-        for (int i = 0; i < GX; i++)
-        for (int k = 0; k < GZ; k++)
-        {
-            // Global lattice coordinates ensure neighboring chunks
-            // share identical edge samples.
-            double cellX = cx * 4 + i;
-            double cellZ = cz * 4 + k;
-
-            // 2D noise: overall height and roughness.
-            double scaleN = _scale2D.Sample(
-                cellX * 1.121, 10, cellZ * 1.121);
-
-            double depthN = ShapeDepth(
-                _depth2D.Sample(
-                    cellX * 200, 10, cellZ * 200) / 8000.0);
-
-            // Macro-scale continentalness (sampled once per lattice column)
-            // Tweak the divisor (2000.0) to make continents larger or smaller.
-            double continentalness = _continentalNoise.Sample(
-                cellX * 4 / ContinentalNoiseScale,
-                0,
-                cellZ * 4 / ContinentalNoiseScale) / ContinentalNormalize;
-
-            // Your original roughness term, unchanged.
-            double baseVariation =
-                Math.Clamp(
-                    (scaleN + 256) / 512 * Roughness,
-                    0, 1) * 0.9 + 0.1;
-
-            // Cold and dry regions get flatter terrain. Warm, wet regions
-            // (hilliness near 1) keep the original roughness exactly.
-            double hilliness = Climate.Hilliness((int)(cellX * 4), (int)(cellZ * 4));
-            double variation = baseVariation * Lerp(hilliness, ClimateFlatFloor, 1.0);
-
-            // Height offset now incorporates continental noise safely
-            double heightOffset =
-                BaseHeight
-                + (continentalness * ContinentalHeightInfluence)
-                + (depthN * DepthInfluence);
-
-            double centerCell =
-                GY / 2.0 + heightOffset * (GY / 16.0) * 4.0;
-
-            // Convert the target terrain elevation to block coordinates.
-            // The current density lattice has eight blocks per vertical cell.
-            double targetHeight = centerCell * 8.0;
-
-            int maxTerrainY = World.Height - TerrainBuildHeightBuffer;
-            int fadeStartY = maxTerrainY - HighAltitudeFadeDepth;
-
-            // Compress high elevations smoothly instead of letting the terrain
-            // continue rising linearly toward the build height limit.
-            if (targetHeight > fadeStartY)
-            {
-                double excessHeight = targetHeight - fadeStartY;
-
-                targetHeight = fadeStartY +
-                    HighAltitudeFadeDepth *
-                    (1.0 - Math.Exp(-excessHeight / HighAltitudeFadeDepth));
-            }
-
-            centerCell = targetHeight / 8.0;
-
-            for (int j = 0; j < GY; j++)
-            {
-                double lo = _low.Sample(
-                    cellX * NoiseScale,
-                    j * NoiseScale,
-                    cellZ * NoiseScale) / 512;
-
-                double hi = _high.Sample(
-                    cellX * NoiseScale,
-                    j * NoiseScale,
-                    cellZ * NoiseScale) / 512;
-
-                double sel = (
-                    _select.Sample(
-                        cellX * NoiseScale / 80,
-                        j * NoiseScale / 160,
-                        cellZ * NoiseScale / 80) / 10 + 1) / 2;
-
-                double v = sel < 0
-                    ? lo
-                    : sel > 1
-                        ? hi
-                        : lo + (hi - lo) * sel;
-
-                // Density falls as altitude increases.
-                // Below the center, the gradient is four times stronger.
-                double grad = (j - centerCell) * 12.0 / variation;
-
-                if (grad < 0)
-                    grad *= 4;
-
-                v -= grad;
-
-                // Force air at the very top of the world.
-                if (j > GY - 4)
-                {
-                    double t = (j - (GY - 4)) / 3.0;
-                    v = v * (1 - t) + -10 * t;
-                }
-
-                d[i, j, k] = v;
-            }
-        }
-
-        return d;
-    }
-
-    private static double ShapeDepth(double d)
-    {
-        if (d < 0)
-            d = -d * 0.3;
-
-        d = d * 3 - 2;
-
-        if (d < 0)
-        {
-            d /= 2;
-
-            if (d < -1)
-                d = -1;
-
-            d /= 1.4;
-            d /= 2;
-        }
-        else
-        {
-            if (d > 1)
-                d = 1;
-
-            d /= 8;
-        }
-
-        return d;
+        _surfaceGenerator.Generate(cx, cz, col);
     }
 
     private void FillFromDensity(double[,,] g, byte[,,] col)
     {
+        int maxTerrainY = World.Height - TerrainBuildHeightBuffer;
+
         for (int i = 0; i < 4; i++)
         for (int k = 0; k < 4; k++)
         for (int j = 0; j < 16; j++)
@@ -261,8 +123,6 @@ public class TerrainGenerator
                     {
                         double v = Lerp(dz / 4.0, ab, ce);
 
-                        int maxTerrainY = World.Height - TerrainBuildHeightBuffer;
-
                         byte block = v > 0
                             ? _stoneId
                             : y < World.SeaLevel
@@ -288,99 +148,4 @@ public class TerrainGenerator
         double a,
         double b)
         => a + t * (b - a);
-
-    // Converts the top of the stone into grass, dirt, or sand
-    // and adds bedrock.
-    private void SurfacePass(int cx, int cz, byte[,,] col)
-    {
-        var rng = new Random(
-            unchecked(_seed * 31 +
-            cx * 341873128 +
-            cz * 132897987));
-
-        const double d = 0.03125;
-
-        for (int x = 0; x < 16; x++)
-        for (int z = 0; z < 16; z++)
-        {
-            int wx = cx * 16 + x;
-            int wz = cz * 16 + z;
-
-            bool isSand =
-                _sandNoise.Sample(wx * d, wz * d, 0) +
-                rng.NextDouble() * 0.2 > 0;
-
-            int stoneDepth = (int)(
-                _stoneDepth.Sample(
-                    wx * d * 2,
-                    wz * d * 2,
-                    d * 2) / 3.0 +
-                3.0 +
-                rng.NextDouble() * 0.25);
-
-            var biome = Climate.GetBiome(wx, wz);
-
-            int run = -1;
-            byte filler = biome.FillerBlock;
-
-            for (int y = World.Height - 1; y >= 0; y--)
-            {
-                if (y < 5 && y <= rng.Next(5))
-                {
-                    col[x, y, z] = _bedrockId;
-                    continue;
-                }
-
-                byte b = col[x, y, z];
-
-                if (b == _airId)
-                {
-                    run = -1;
-                    continue;
-                }
-
-                // Leave water unchanged.
-                if (b != _stoneId)
-                    continue;
-
-                // First stone below air or water is the surface.
-                if (run == -1)
-                {
-                    byte top = biome.TopBlock;
-                    filler = biome.FillerBlock;
-
-                    if (stoneDepth <= 0)
-                    {
-                        top = _airId;
-                        filler = _stoneId;
-                    }
-                    else if (
-                        y >= World.SeaLevel - 4 &&
-                        y <= World.SeaLevel + 1 &&
-                        isSand)
-                    {
-                        top = _sandId;
-                        filler = _sandId;
-                    }
-
-                    if (y < World.SeaLevel && top == _airId)
-                        top = _waterId;
-
-                    run = stoneDepth;
-
-                    // Above the waterline: top block.
-                    // Underwater: filler, so no underwater grass.
-                    col[x, y, z] =
-                        y >= World.SeaLevel - 1
-                            ? top
-                            : filler;
-                }
-                else if (run > 0)
-                {
-                    run--;
-                    col[x, y, z] = filler;
-                }
-            }
-        }
-    }
 }

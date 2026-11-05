@@ -9,15 +9,17 @@ public sealed class Hotkeys
     private readonly DayNightCycle _dayNight;
     private readonly WindowManager _windowManager;
     private readonly FrameRateLimiter _fps;
+    private readonly ScreenshotManager _screenshotManager;
     private readonly ActionInput _input;
 
     public Hotkeys(World world, DayNightCycle dayNight, WindowManager windowManager,
-                   FrameRateLimiter fps, ActionInput input)
+                   FrameRateLimiter fps, ScreenshotManager screenshotManager, ActionInput input)
     {
         _world = world;
         _dayNight = dayNight;
         _windowManager = windowManager;
         _fps = fps;
+        _screenshotManager = screenshotManager;
         _input = input;
     }
 
@@ -25,10 +27,11 @@ public sealed class Hotkeys
     {
         if (_input.WasPressed(GameAction.CycleFpsCap)) _fps.CycleNext();
         if (_input.WasPressed(GameAction.CycleWindowMode)) _windowManager.CycleNextMode();
-        if (_input.WasPressed(GameAction.CycleRenderDistance))
-                {
-                    _world.CycleRenderDistance();
-                }
+        if (_input.WasPressed(GameAction.CycleRenderDistance)) _world.CycleRenderDistance();
+        
+        // Trigger screenshot via action input system
+        if (_input.WasPressed(GameAction.Screenshot)) _screenshotManager.CaptureScreenshot();
+
         if (_input.WasPressed(GameAction.CycleLeafCulling))
         {
             ChunkMesher.LeafCullDepth = (ChunkMesher.LeafCullDepth + 1) % (ChunkMesher.MaxLeafDepth + 1);

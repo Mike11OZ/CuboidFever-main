@@ -22,8 +22,14 @@ public struct BlockInfo
     // Which update rules the block follows when it or a neighbour changes (see BlockTickScheduler)
     public TickKind Tick;
 }
+
+// Rendering and block metadata are baked once during initialization.
+// Do not mutate registry data or replace the registry while world
+// generation or asynchronous chunk meshing is active.
 public sealed class BlockRegistry
 {
+    public static BlockRegistry Instance { get; private set; }
+
     public readonly BlockInfo[] Info = new BlockInfo[256];
     private readonly TextureRegion[] _faceRegions = new TextureRegion[256 * 6];
 
@@ -111,7 +117,14 @@ public sealed class BlockRegistry
                 throw new InvalidDataException(
                     $"No water block defines fluidLevel {level}.");
     }
-    public static BlockRegistry Instance { get; private set; }
+    public static void Initialize(string dataRoot)
+    {
+        if (Instance != null)
+            throw new InvalidOperationException(
+                "BlockRegistry has already been initialized.");
+
+        Instance = new BlockRegistry(dataRoot);
+    }
 
     private readonly Dictionary<string, byte> _ids =
         new(StringComparer.OrdinalIgnoreCase);
@@ -168,11 +181,6 @@ public sealed class BlockRegistry
         GetTextureRegion(id, face).Index;
 
     public byte[] HotbarIds { get; private set; } = Array.Empty<byte>();
-
-    public static void Initialize(string dataRoot)
-    {
-        Instance = new BlockRegistry(dataRoot);
-    }
 
     private BlockRegistry(string dataRoot)
     {

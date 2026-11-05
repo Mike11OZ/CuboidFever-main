@@ -1,3 +1,4 @@
+
 using System;
 using Microsoft.Xna.Framework;
 
@@ -45,17 +46,31 @@ public sealed class ClimateMap
 
         for (int t = 0; t < TableSize; t++)
         for (int h = 0; h < TableSize; h++)
-            _lookup[t + h * TableSize] = PickBiome(t / (double)(TableSize - 1), h / (double)(TableSize - 1));
+        {
+            _lookup[t + h * TableSize] = PickBiome(
+                t / (double)(TableSize - 1),
+                h / (double)(TableSize - 1));
+        }
     }
 
     /// <summary>Temperature and humidity (both 0..1) at a world block column.</summary>
     public (double temperature, double humidity) Sample(int wx, int wz)
     {
-        double temp = _temperatureNoise.Sample(wx * TemperatureScale, wz * TemperatureScale, 0);
-        double humid = _humidityNoise.Sample(wx * HumidityScale, wz * HumidityScale, 0);
+        double temp = _temperatureNoise.Sample(
+            wx * TemperatureScale,
+            wz * TemperatureScale,
+            0);
+
+        double humid = _humidityNoise.Sample(
+            wx * HumidityScale,
+            wz * HumidityScale,
+            0);
 
         // A little fine-grained wobble so biome borders aren't perfectly smooth contours.
-        double detail = _detailNoise.Sample(wx * DetailScale, wz * DetailScale, 0) * 1.1 + 0.5;
+        double detail = _detailNoise.Sample(
+            wx * DetailScale,
+            wz * DetailScale,
+            0) * 1.1 + 0.5;
 
         temp = (temp * 0.15 + 0.7) * 0.99 + detail * 0.01;
         humid = (humid * 0.15 + 0.5) * 0.998 + detail * 0.002;
@@ -105,17 +120,35 @@ public sealed class ClimateMap
     {
         var (temp, humid) = Sample(wx, wz);
 
-        float dry = (float)Math.Clamp(1.0 - temp * humid / LushWetness, 0, 1);
-        float cold = (float)Math.Clamp((ColdStart - temp) / ColdRange, 0, 1);
+        float dry = (float)Math.Clamp(
+            1.0 - temp * humid / LushWetness,
+            0,
+            1);
 
-        grass = Vector3.Lerp(Vector3.Lerp(Vector3.One, GrassDry, dry), GrassCold, cold);
-        foliage = Vector3.Lerp(Vector3.Lerp(Vector3.One, FoliageDry, dry), FoliageCold, cold);
+        float cold = (float)Math.Clamp(
+            (ColdStart - temp) / ColdRange,
+            0,
+            1);
+
+        grass = Vector3.Lerp(
+            Vector3.Lerp(Vector3.One, GrassDry, dry),
+            GrassCold,
+            cold);
+
+        foliage = Vector3.Lerp(
+            Vector3.Lerp(Vector3.One, FoliageDry, dry),
+            FoliageCold,
+            cold);
     }
 
     public Biome GetBiome(int wx, int wz)
     {
         var (temp, humid) = Sample(wx, wz);
-        return _lookup[(int)(temp * 63) + (int)(humid * 63) * TableSize];
+
+        int t = (int)(temp * (TableSize - 1));
+        int h = (int)(humid * (TableSize - 1));
+
+        return _lookup[t + h * TableSize];
     }
 
     // Beta's biome chart. "humid" is scaled by temperature first, so the

@@ -1,3 +1,4 @@
+
 using System.Collections.Generic;
 
 namespace CuboidFever;
@@ -18,13 +19,20 @@ public sealed class Biome
     // Feature name (Feature.Name) -> how common it is here. Missing = 1.
     private readonly IReadOnlyDictionary<string, double> _featureDensity;
 
-    public Biome(string name, byte topBlock, byte fillerBlock,
+    public Biome(
+        string name,
+        byte topBlock,
+        byte fillerBlock,
         IReadOnlyDictionary<string, double> featureDensity = null)
     {
         Name = name;
         TopBlock = topBlock;
         FillerBlock = fillerBlock;
-        _featureDensity = featureDensity ?? new Dictionary<string, double>();
+
+        // Make a defensive copy so external references cannot modify biome data.
+        _featureDensity = featureDensity != null
+            ? new Dictionary<string, double>(featureDensity)
+            : new Dictionary<string, double>();
     }
 
     /// <summary>
@@ -52,7 +60,6 @@ public sealed class Biomes
         byte grass = blocks.GetId("cuboidfever:grass");
         byte dirt = blocks.GetId("cuboidfever:dirt");
         byte sand = blocks.GetId("cuboidfever:sand");
-        byte mud_dried = blocks.GetId("cuboidfever:mud_dried");
         byte mud = blocks.GetId("cuboidfever:mud");
 
         // Tree densities: oak, big oak, pine, big pine. These multiply each
@@ -69,7 +76,11 @@ public sealed class Biomes
         Tundra = new Biome("Tundra", grass, dirt, Trees(0, 0, 0.2, 0.1));
     }
 
-    private static Dictionary<string, double> Trees(double oak, double bigOak, double pine, double bigPine) => new()
+    private static Dictionary<string, double> Trees(
+        double oak,
+        double bigOak,
+        double pine,
+        double bigPine) => new()
     {
         ["oak_tree"] = oak,
         ["big_oak_tree"] = bigOak,

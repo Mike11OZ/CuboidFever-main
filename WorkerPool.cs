@@ -4,34 +4,77 @@ using System.Threading;
 
 namespace CuboidFever;
 
-public sealed class WorkerPool
+public sealed class WorkerPool : IDisposable
 {
-    private readonly ConcurrentQueue<Action> _jobs = new();
-    private readonly SemaphoreSlim _signal = new(0);
+    private readonly BlockingCollection<Action> _jobs = new(new ConcurrentQueue<Action>());
+    private readonly Thread[] _threads;
+    private readonly object _lifecycleLock = new();
 
-    public int Count { get; }
+    private bool _disposed;
+
+    public int Count => _threads.Length;
 
     public WorkerPool(int threads)
     {
-        Count = threads;
+        if (threads <= 0)
+            throw new ArgumentOutOfRangeException(nameof(threads));
+
+        _threads = new Thread[threads];
+
         for (int i = 0; i < threads; i++)
-            new Thread(Loop) { IsBackground = true, Name = $"CuboidFever worker {i}" }.Start();
+        {
+            _threads[i] = new Thread(Loop)
+            {
+                IsBackground = true,
+                Name = $"CuboidFever worker {i}"
+            };
+
+            _threads[i].Start();
+        }
     }
 
     public void Enqueue(Action job)
     {
-        _jobs.Enqueue(job);
-        _signal.Release();
+        ArgumentNullException.ThrowIfNull(job);
+
+        lock (_lifecycleLock)
+        {
+            if (_disposed)
+                throw new ObjectDisposedException(nameof(WorkerPool));
+
+            _jobs.Add(job);
+        }
     }
 
     private void Loop()
     {
-        while (true)
+        foreach (var job in _jobs.GetConsumingEnumerable())
         {
-            _signal.Wait();
-            if (!_jobs.TryDequeue(out var job)) continue;
-            try { job(); }
-            catch (Exception e) { Console.Error.WriteLine($"[worker] {e}"); } // errors show in the terminal
+            try
+            {
+                job();
+            }
+            catch (Exception e)
+            {
+                Console.Error.WriteLine($"[worker] {e}");
+            }
         }
+    }
+
+    public void Dispose()
+    {
+        lock (_lifecycleLock)
+        {
+            if (_disposed)
+                return;
+
+            _disposed = true;
+            _jobs.CompleteAdding();
+        }
+
+        foreach (var thread in _threads)
+            thread.Join();
+
+        _jobs.Dispose();
     }
 }

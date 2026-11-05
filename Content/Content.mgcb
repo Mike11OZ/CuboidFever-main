@@ -28,3 +28,8 @@
 /processor:EffectProcessor
 /processorParam:DebugMode=Auto
 /build:SolidShader.fx
+
+#begin MenuFont.spritefont
+/importer:FontDescriptionImporter
+/processor:FontDescriptionProcessor
+/build:MenuFont.spritefont

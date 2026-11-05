@@ -1,3 +1,4 @@
+
 using System;
 
 namespace CuboidFever;
@@ -13,10 +14,43 @@ public sealed class FeatureContext
     private readonly byte _airId;
     private readonly Biome[,] _biomes; // [x, z], one per block column
 
-    public FeatureContext(byte[,,] blocks, int columnX, int columnZ, byte airId, Random rng, Biome[,] biomes)
+    public FeatureContext(
+        byte[,,] blocks,
+        int columnX,
+        int columnZ,
+        byte airId,
+        DeterministicRandom rng,
+        Biome[,] biomes)
     {
-        _biomes = biomes;
+        if (blocks == null)
+            throw new ArgumentNullException(nameof(blocks));
+
+        if (rng == null)
+            throw new ArgumentNullException(nameof(rng));
+
+        if (biomes == null)
+            throw new ArgumentNullException(nameof(biomes));
+
+        if (blocks.GetLength(0) != Chunk.Size ||
+            blocks.GetLength(1) != World.Height ||
+            blocks.GetLength(2) != Chunk.Size)
+        {
+            throw new ArgumentException(
+                "Invalid column dimensions.",
+                nameof(blocks));
+        }
+
+        if (biomes.GetLength(0) != Chunk.Size ||
+            biomes.GetLength(1) != Chunk.Size)
+        {
+            throw new ArgumentException(
+                "Invalid biome map dimensions.",
+                nameof(biomes));
+        }
+
         _blocks = blocks;
+        _biomes = biomes;
+
         ColumnX = columnX;
         ColumnZ = columnZ;
         _airId = airId;
@@ -28,7 +62,7 @@ public sealed class FeatureContext
     public int ColumnZ { get; }
 
     /// <summary>Deterministic per (world seed, feature, column).</summary>
-    public Random Rng { get; }
+    public DeterministicRandom Rng { get; }
 
     /// <summary>Biome at a local (x, z) in this column.</summary>
     public Biome BiomeAt(int x, int z) => _biomes[x, z];
@@ -82,6 +116,7 @@ public sealed class FeatureContext
 
         return y;
     }
+
     /// <summary>
     /// Finds the highest terrain block at (x, z), ignoring leaves, logs,
     /// water, and other decorations. Returns -1 if no terrain is found.

@@ -33,6 +33,9 @@ public class World
     private readonly ConcurrentQueue<Column> _generated = new();
     private readonly ConcurrentQueue<MeshData> _meshed = new();
 
+    private readonly ConcurrentQueue<(int cx, int cz, Exception error)>
+        _generationFailures = new();
+
     private readonly TerrainGenerator _gen;
     private readonly CaveCarver _caves;
     private readonly PlacedFeatures _features;
@@ -130,6 +133,7 @@ public class World
 
         RequestColumns(ccx, ccz);
         DrainGenerated(ccx, ccz);
+        DrainGenerationFailures();
 
         if ((ccx, ccz) != _lastCenter)
         {
@@ -170,29 +174,47 @@ public class World
         {
             var (_, x, z) = _cand[i];
             _generating.Add((x, z));
-            _pool.Enqueue(() => GenerateJob(x, z));
+
+            try
+            {
+                _pool.Enqueue(() => GenerateJob(x, z));
+            }
+            catch
+            {
+                _generating.Remove((x, z));
+                throw;
+            }
         }
     }
 
     private void GenerateJob(int cx, int cz)
     {
-        var blocks = new byte[Chunk.Size, Height, Chunk.Size];
-        _gen.GenerateColumn(cx, cz, blocks);   // terrain shape + surface
-        _caves.Carve(cx, cz, blocks);          // tunnels and rooms, before features so trees never float over a hole
-        _features.Generate(cx, cz, blocks);    // trees, rocks, etc.
-
-        var col = new Column(cx, cz);
-        for (int cy = 0; cy < ChunksY; cy++)
+        try
         {
-            var chunk = new Chunk(cx, cy, cz);
-            chunk.CopyFromColumn(blocks);
-            col.Chunks[cy] = chunk;
+            var blocks = new byte[Chunk.Size, Height, Chunk.Size];
+
+            _gen.GenerateColumn(cx, cz, blocks);
+            _caves.Carve(cx, cz, blocks);
+            _features.Generate(cx, cz, blocks);
+
+            var col = new Column(cx, cz);
+
+            for (int cy = 0; cy < ChunksY; cy++)
+            {
+                var chunk = new Chunk(cx, cy, cz);
+                chunk.CopyFromColumn(blocks);
+                col.Chunks[cy] = chunk;
+            }
+
+            col.ComputeSkyLight();
+
+            _generated.Enqueue(col);
         }
-        col.ComputeSkyLight();
-
-        _generated.Enqueue(col);
+        catch (Exception e)
+        {
+            _generationFailures.Enqueue((cx, cz, e));
+        }
     }
-
     private void DrainGenerated(int ccx, int ccz)
     {
         var sw = Stopwatch.StartNew();
@@ -210,6 +232,17 @@ public class World
             for (int nz = -1; nz <= 1; nz++)
             for (int nx = -1; nx <= 1; nx++)
                 TryActivate(GetColumn(col.CX + nx, col.CZ + nz));
+        }
+    }
+    private void DrainGenerationFailures()
+    {
+        while (_generationFailures.TryDequeue(out var failure))
+        {
+            _generating.Remove((failure.cx, failure.cz));
+
+            Console.Error.WriteLine(
+                $"[World] Failed to generate column " +
+                $"({failure.cx}, {failure.cz}): {failure.error}");
         }
     }
 
@@ -326,7 +359,8 @@ public class World
             _inFlight.Remove(m.Chunk);
             if (m.Chunk.Unloaded) continue;
 
-            if (m.Version > m.Chunk.AppliedVersion)
+            if (m.Version == m.Chunk.Version &&
+                m.Version > m.Chunk.AppliedVersion)
             {
                 m.Chunk.ApplyMesh(device, m);
                 m.Chunk.AppliedVersion = m.Version;

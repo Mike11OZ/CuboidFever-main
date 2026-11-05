@@ -18,10 +18,10 @@ public sealed class DayNightCycle
     public float SkyBrightness { get; private set; } = 1f;
 
     // -1 at midnight, 0 at sunrise and sunset, +1 at noon.
-    public float SunHeight => -MathF.Cos(TimeOfDay * MathHelper.TwoPi);
+    public float SunHeight => MathF.Sin(TimeOfDay * MathHelper.TwoPi);
 
     // Unit vector toward the sun: rises in +Z, passes overhead at noon, sets in -Z.
-    public Vector3 SunDirection => new(0f, SunHeight, MathF.Sin(TimeOfDay * MathHelper.TwoPi));
+    public Vector3 SunDirection => new(0f, SunHeight, MathF.Cos(TimeOfDay * MathHelper.TwoPi));
 
     // 0 = full night, 1 = full day, easing through sunrise and sunset.
     private float DayFactor =>
@@ -58,7 +58,8 @@ public sealed class DayNightCycle
 
     public void Reset()
     {
-        TimeOfDay = 0f;
+        // Start a little after sunrise (0.04f corresponds to roughly 07:00 AM)
+        TimeOfDay = 0.04f;
         Paused = false;
         DayLengthSeconds = DefaultDayLengthSeconds;
         UpdateSky();
