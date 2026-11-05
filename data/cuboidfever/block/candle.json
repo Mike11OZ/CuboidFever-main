@@ -1,0 +1,15 @@
+{
+  "name": "cuboidfever:candle",
+  "solid": false,
+  "transparent": true,
+  "fullBlock": false,
+  "replaceable": false,
+  "renderType": "cross",
+  "renderLayer": "transparent",
+  "emissive": true,
+  "emission": { "r": 8, "g": 5, "b": 1 },
+  "tint": [255, 255, 255],
+  "textures": {
+    "all": "cuboidfever:candle"
+  }
+}

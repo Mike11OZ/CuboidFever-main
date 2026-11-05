@@ -80,6 +80,10 @@ public class Game1 : Game
         InputManager.Initialize();
         _dayNight.LoadSettings(GamePaths.DayNightConfig);
         _dayNight.Reset();
+// ---- Initialize Audio Handler ----
+        _audioManager = new AudioManager();
+        _audioManager.Volume = 0.8f;
+        _audioManager.InitializePlaylist(); // Preloads songs and sound effects
 
         var blocks = BlockRegistry.Instance;
 
@@ -89,7 +93,9 @@ public class Game1 : Game
         _world = new World(8374173);
         _hotkeys = new Hotkeys(_world, _dayNight, _windowManager, _fps, _input);
         _controller = new PlayerController(_player, _world, _input);
-        _blockInteraction = new BlockInteraction(_world, _player, _controller, _hotbar, _input, _particleSystem, _dayNight);
+        
+        // Pass _audioManager here:
+        _blockInteraction = new BlockInteraction(_world, _player, _controller, _hotbar, _input, _particleSystem, _dayNight, _audioManager);
 
         _spawn = new SpawnSequence(_world, _controller);
         _spawn.LoadContent(GraphicsDevice);
@@ -102,12 +108,6 @@ public class Game1 : Game
 
         _screenEffects = new ScreenEffectManager(GraphicsDevice, _sprites);
         _screenEffects.Add(new UnderwaterTint());
-
-        // ---- Initialize Audio Handler ----
-        _audioManager = new AudioManager();
-        _audioManager.Volume = 0.8f;
-        _audioManager.InitializePlaylist(); // Preloads all songs into memory during startup
-        // Do not play immediately; wait for spawn
 
         // Built last because it reads from almost everything above
         _debugOverlay = new DebugOverlay(debugFont, _sprites, _input, _world, _player, _fps, _hotbar,

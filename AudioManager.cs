@@ -1,8 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Text.Json;
+using System.Linq;
 using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Audio;
 using Microsoft.Xna.Framework.Media;
 
 namespace CuboidFever;
@@ -16,6 +17,7 @@ public class AudioManager
     // simply set MinDelaySeconds and MaxDelaySeconds to the exact same value (e.g., 5.0f).
 
     private Dictionary<string, Song> _songs = new();
+    private Dictionary<string, SoundEffect> _soundEffects = new();
     private List<string> _availableTrackNames = new();
     
     private float _delaySeconds;
@@ -39,7 +41,7 @@ public class AudioManager
     }
 
     /// <summary>
-    /// Loads tracks specified in data/cuboidfever/music_list.json into memory upfront to prevent runtime hitches.
+    /// Loads tracks specified in data/cuboidfever/music_list.json and sound effects (.wav) into memory upfront.
     /// Call this once during game startup.
     /// </summary>
     public void InitializePlaylist()
@@ -63,42 +65,74 @@ public class AudioManager
                 return;
             }
 
+            // ---- Load Music Tracks (.ogg) from JSON list ----
             string jsonContent = File.ReadAllText(jsonPath);
-            List<string> trackNames = JsonSerializer.Deserialize<List<string>>(jsonContent);
+            List<string> trackNames = System.Text.Json.JsonSerializer.Deserialize<List<string>>(jsonContent);
 
-            if (trackNames == null || trackNames.Count == 0)
+            if (trackNames != null)
             {
-                Console.WriteLine("[Audio] Music list is empty or invalid.");
-                CurrentSongName = "None (Music List Empty)";
-                return;
+                foreach (var assetName in trackNames)
+                {
+                    string fullPath = Path.Combine(soundsDir, $"{assetName}.ogg");
+                    if (!File.Exists(fullPath))
+                    {
+                        Console.WriteLine($"[Audio] Track file not found: {fullPath}");
+                        continue;
+                    }
+
+                    try
+                    {
+                        Song song = Song.FromUri(assetName, new Uri(fullPath, UriKind.Absolute));
+                        _songs[assetName] = song;
+                        _availableTrackNames.Add(assetName);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[Audio] Failed to load track {assetName}: {ex.Message}");
+                    }
+                }
             }
 
-            foreach (var assetName in trackNames)
-            {
-                string fullPath = Path.Combine(soundsDir, $"{assetName}.ogg");
-                if (!File.Exists(fullPath))
-                {
-                    Console.WriteLine($"[Audio] Track file not found: {fullPath}");
-                    continue;
-                }
+            // ---- Load Sound Effects (.wav) automatically from sounds directory ----
+            var wavFiles = Directory.GetFiles(soundsDir, "*.wav")
+                .Select(Path.GetFileNameWithoutExtension)
+                .ToArray();
 
+            foreach (var assetName in wavFiles)
+            {
+                string fullPath = Path.Combine(soundsDir, $"{assetName}.wav");
                 try
                 {
-                    Song song = Song.FromUri(assetName, new Uri(fullPath, UriKind.Absolute));
-                    _songs[assetName] = song;
-                    _availableTrackNames.Add(assetName);
+                    using var stream = File.OpenRead(fullPath);
+                    SoundEffect sfx = SoundEffect.FromStream(stream);
+                    _soundEffects[assetName] = sfx;
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[Audio] Failed to load track {assetName}: {ex.Message}");
+                    Console.WriteLine($"[Audio] Failed to load sound effect {assetName}: {ex.Message}");
                 }
             }
 
-            Console.WriteLine($"[Audio] Successfully preloaded {_songs.Count} music tracks from JSON.");
+            Console.WriteLine($"[Audio] Successfully preloaded {_songs.Count} music tracks and {_soundEffects.Count} sound effects.");
         }
         catch (Exception ex)
         {
             Console.WriteLine($"[Audio] Failed to initialize playlist: {ex.Message}");
+        }
+    }
+
+    public void PlaySound(string soundName, float volumeScale = 1.0f)
+    {
+        if (_soundEffects.TryGetValue(soundName, out var sfx))
+        {
+            try
+            {
+                sfx.Play(_volume * volumeScale, 0f, 0f);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Audio] Failed to play sound {soundName}: {ex.Message}");
+            }
         }
     }
 

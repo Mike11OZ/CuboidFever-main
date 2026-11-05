@@ -1,0 +1,15 @@
+{
+  "name": "cuboidfever:torch",
+  "solid": false,
+  "transparent": true,
+  "fullBlock": false,
+  "replaceable": false,
+  "renderType": "cross",
+  "renderLayer": "transparent",
+  "emissive": true,
+  "emission": { "r": 15, "g": 10, "b": 3 },
+  "tint": [255, 255, 255],
+  "textures": {
+    "all": "cuboidfever:torch"
+  }
+}
