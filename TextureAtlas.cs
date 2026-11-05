@@ -145,8 +145,8 @@ public sealed class TextureAtlas
         {
             string file = files[index];
 
-            using var stream = File.OpenRead(file);
-            using var source = Texture2D.FromStream(device, stream);
+            using var source = TextureLoader.LoadFromFile(device, file)
+                ?? throw new InvalidDataException($"Failed to load texture: {file}");
 
             if (source.Width != TextureSize || source.Height != TextureSize)
             {
@@ -178,7 +178,6 @@ public sealed class TextureAtlas
             string relative = Path.GetRelativePath(textureDirectory, file);
             string resourceName = "cuboidfever:" +
                 Path.ChangeExtension(relative, null)
-                    .Replace('\\', '/')
                     .Replace('\\', '/');
 
             var bounds = new Rectangle(

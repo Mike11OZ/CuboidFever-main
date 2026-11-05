@@ -24,17 +24,18 @@ public sealed class KeyBindings
 
         [GameAction.ToggleFly]        = Keys.V,
         [GameAction.CycleFpsCap]      = Keys.F,
-        [GameAction.CycleWindowMode]  = Keys.F11,
         [GameAction.CycleLeafCulling] = Keys.L,
         [GameAction.ToggleAo]         = Keys.O,
         [GameAction.PauseTime]        = Keys.P,
         [GameAction.ScrubTimeBack]    = Keys.OemComma,
         [GameAction.ScrubTimeForward] = Keys.OemPeriod,
-        [GameAction.ToggleDebugOverlay] = Keys.F3,
         [GameAction.CycleRenderDistance] = Keys.R,
+        [GameAction.ToggleHud] = Keys.F1,
+        [GameAction.ToggleDebugOverlay] = Keys.F3,
+        [GameAction.CycleWindowMode]  = Keys.F11,
         [GameAction.Screenshot] = Keys.F12,
 
-        [GameAction.Quit] = Keys.Escape,
+        [GameAction.Pause] = Keys.Escape,
     };
 
     private readonly Dictionary<GameAction, Binding> _map = new(Defaults);

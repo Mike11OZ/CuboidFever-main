@@ -27,12 +27,21 @@ public class Game1 : Game
         MainMenu,  // title screen
         Spawning,  // loading screen while the world around the spawn point generates
         Playing,   // in the world
+        Paused,    // in the world, frozen, with the pause menu over it
+        Settings,  // settings screen, opened from the main menu or the pause menu
     }
     private GameState _state = GameState.Startup;
+
+    // Where Back goes from the settings screen: MainMenu or Paused, whichever opened it
+    private GameState _settingsReturnState = GameState.MainMenu;
+
+    private const int WorldSeed = 715310;
 
     private LoadingScreen _loadingScreen = null!; // shared by every phase that shows a loading screen
     private StartupScreen _startup = null!;       // runs the initialization steps while the loading screen is up
     private MainMenu _mainMenu = null!;
+    private PauseMenu _pauseMenu = null!;
+    private SettingsMenu _settingsMenu = null!;
 
     // ---- Audio ----
     private AudioManager _audioManager = null!;
@@ -53,6 +62,9 @@ public class Game1 : Game
     private SpriteBatch _sprites = null!; // shared with LoadingScreen, Hud and DebugOverlay
     private SpriteFont _debugFont = null!;
     private SpriteFont _menuFont = null!; // larger font for menus and buttons
+    private Effect _solidShader = null!;  // loaded once at startup, reused by every world's renderer
+    private Effect _waterShader = null!;
+    
 
     public Game1()
     {
@@ -88,10 +100,13 @@ public class Game1 : Game
         _startup.AddStep("Input and day/night", InitInputAndDayNight);
         _startup.AddStep("Audio", InitAudio);
         _startup.AddStep("Hotbar and HUD", InitHotbarAndHud);
-        _startup.AddStep("World and player", InitWorldAndPlayer);
-        _startup.AddStep("Shaders and renderer", InitRenderer);
-        _startup.AddStep("Screen effects and debug overlay", InitScreenEffectsAndDebugOverlay);
-        _startup.AddStep("Main menu", InitMainMenu);
+        _startup.AddStep("Shaders", InitShaders);
+        _startup.AddStep("Screen effects", InitScreenEffects);
+        _startup.AddStep("Menus", InitMenus);
+
+        // The world, player, renderer and everything else that belongs to one particular world is not built
+        // here. It is built when the player presses Play Now (CreateWorldSession) and thrown away on
+        // Exit World (DestroyWorldSession), so a player can leave a world and start a fresh one.
     }
 
     // =====================  STARTUP STEPS  =====================
@@ -99,8 +114,6 @@ public class Game1 : Game
     private void InitTextureAtlas()
     {
         TextureAtlas.Initialize(GraphicsDevice, GamePaths.BlockTextureRoot, GamePaths.TextureAtlasConfig);
-
-        _particleSystem.Init(TextureAtlas.Instance);
     }
 
     private void InitWindowAndFonts()
@@ -113,7 +126,7 @@ public class Game1 : Game
 
         try
         {
-            _debugFont = Content.Load<SpriteFont>("DebugFont");
+            _debugFont = Content.Load<SpriteFont>("Fonts/DebugFont");
         }
         catch (Exception ex)
         {
@@ -123,7 +136,7 @@ public class Game1 : Game
         // If the menu font is missing, fall back to the (smaller) debug font rather than crashing
         try
         {
-            _menuFont = Content.Load<SpriteFont>("MenuFont");
+            _menuFont = Content.Load<SpriteFont>("Fonts/MenuFont");
         }
         catch (Exception ex)
         {
@@ -160,42 +173,107 @@ public class Game1 : Game
         _hud = new Hud(GraphicsDevice, _sprites, TextureAtlas.Instance.Texture, _hotbar);
     }
 
-    private void InitWorldAndPlayer()
+    private void InitShaders()
     {
-        _world = new World(715310);
-        _hotkeys = new Hotkeys(_world, _dayNight, _windowManager, _fps, _screenshotManager, _input);
+        _solidShader = Content.Load<Effect>("SolidShader");
+        _waterShader = Content.Load<Effect>("WaterShader");
+    }
+
+    private void InitScreenEffects()
+    {
+        _screenEffects = new ScreenEffectManager(GraphicsDevice, _sprites);
+        _screenEffects.Add(new UnderwaterTint());
+    }
+
+    private void InitMenus()
+    {
+        _mainMenu = new MainMenu(
+            GraphicsDevice,
+            _menuFont,
+            _audioManager.PlayMenuSound
+        );
+
+        _mainMenu.PlayRequested += StartGame;
+        _mainMenu.SettingsRequested += OnSettingsRequested;
+        _mainMenu.ExitRequested += Exit;
+
+        _pauseMenu = new PauseMenu(
+            GraphicsDevice,
+            _menuFont,
+            _audioManager.PlayMenuSound
+        );
+
+        _pauseMenu.ResumeRequested += ResumeGame;
+        _pauseMenu.SettingsRequested += OnSettingsRequested;
+        _pauseMenu.ExitWorldRequested += ExitWorld;
+        _pauseMenu.ExitGameRequested += Exit;
+
+        _settingsMenu = new SettingsMenu(
+            GraphicsDevice,
+            _menuFont,
+            _fps,
+            _windowManager,
+            CycleRenderDistance,
+            OnMeshSettingChanged,
+            _audioManager.PlayMenuSound
+        );
+
+        _settingsMenu.BackRequested += CloseSettings;
+    }
+
+    // =====================  WORLD SESSION  =====================
+    //
+    // Everything that belongs to one particular world: the world itself, the player in it, and the classes
+    // that were built holding a reference to either. Each Play Now makes a complete new set, and Exit World
+    // throws the set away, so nothing from one world (blocks, particles, player position, time of day) can
+    // leak into the next. Things that don't depend on a world (settings, fonts, shaders, the hotbar, the
+    // audio manager) are built once at startup instead.
+
+    private void CreateWorldSession()
+    {
+        _dayNight.Reset();
+        _player = new Player();
+
+        _particleSystem = new ParticleSystem();
+        _particleSystem.Init(TextureAtlas.Instance);
+
+        _world = new World(WorldSeed);
+        _hotkeys = new Hotkeys(
+            _world,
+            _dayNight,
+            _fps,
+            _screenshotManager,
+            _input,
+            _hud
+        );
         _controller = new PlayerController(_player, _world, _input);
 
         _blockInteraction = new BlockInteraction(_world, _player, _controller, _hotbar, _input, _particleSystem, _dayNight, _audioManager);
 
         _spawn = new SpawnSequence(_world, _controller, _loadingScreen);
         _spawn.Spawned += OnSpawned;
-    }
 
-    private void InitRenderer()
-    {
-        var solidShader = Content.Load<Effect>("SolidShader");
-        var waterShader = Content.Load<Effect>("WaterShader");
-        _renderer = new WorldRenderer(GraphicsDevice, solidShader, waterShader, TextureAtlas.Instance.Texture,
+        _renderer = new WorldRenderer(GraphicsDevice, _solidShader, _waterShader, TextureAtlas.Instance.Texture,
                                       _world, _controller, _blockInteraction, _particleSystem, _dayNight);
-    }
-
-    private void InitScreenEffectsAndDebugOverlay()
-    {
-        _screenEffects = new ScreenEffectManager(GraphicsDevice, _sprites);
-        _screenEffects.Add(new UnderwaterTint());
 
         // Built last because it reads from almost everything above
         _debugOverlay = new DebugOverlay(_debugFont, _sprites, _input, _world, _player, _fps, _hotbar,
                                          _windowManager, _dayNight, _audioManager, _blockInteraction);
     }
 
-    private void InitMainMenu()
+    private void DestroyWorldSession()
     {
-        _mainMenu = new MainMenu(GraphicsDevice, _menuFont);
-        _mainMenu.PlayRequested += StartGame;
-        _mainMenu.SettingsRequested += OnSettingsRequested;
-        _mainMenu.ExitRequested += Exit;
+        _world.Dispose(); // stops its worker threads and frees its chunk meshes
+
+        _world = null!;
+        _player = null!;
+        _particleSystem = null!;
+        _hotkeys = null!;
+        _controller = null!;
+        _blockInteraction = null!;
+        _spawn = null!;
+        _renderer = null!;
+        _debugOverlay = null!;
     }
 
     // =====================  STATE CHANGES  =====================
@@ -209,19 +287,75 @@ public class Game1 : Game
         IsMouseVisible = true;
     }
 
-    // "Play Now": hide the cursor, recapture the mouse, and start generating the world.
+    // "Play Now": build a new world, hide the cursor, recapture the mouse, and start generating.
     // The world only begins generating once it starts being updated, which happens in the Spawning state.
     private void StartGame()
     {
+        CreateWorldSession();
+
         InputManager.SetMouseCaptured(true);
         IsMouseVisible = false;
         _state = GameState.Spawning;
     }
 
+    // Esc or the pause menu's "Resume Game": the world freezes in place and the cursor comes back.
+    private void PauseGame()
+    {
+        _state = GameState.Paused;
+
+        InputManager.SetMouseCaptured(false);
+        IsMouseVisible = true;
+    }
+
+    private void ResumeGame()
+    {
+        _state = GameState.Playing;
+
+        InputManager.SetMouseCaptured(true);
+        IsMouseVisible = false;
+
+        // Throw away the mouse movement that built up while paused, so the camera doesn't jump
+        InputManager.GetMouseDelta(out _, out _);
+        Mouse.SetPosition(Window.ClientBounds.Width / 2, Window.ClientBounds.Height / 2);
+    }
+
+    // The pause menu's "Exit World": discard the world and go back to the title screen.
+    private void ExitWorld()
+    {
+        DestroyWorldSession();
+
+        // Stop the music so it doesn't carry over to the title screen. Starting a new world restarts it.
+        _audioManager.Stop();
+
+        EnterMainMenu();
+    }
+
+    // "Settings" from the main menu or the pause menu. Remember which, so Back returns there.
     private void OnSettingsRequested()
     {
-        // The settings menu is the next project; for now the button just reports the click.
-        Console.WriteLine("[Menu] Settings menu not implemented yet.");
+        _settingsReturnState = _state;
+        _state = GameState.Settings;
+    }
+
+    private void CloseSettings()
+    {
+        _state = _settingsReturnState;
+    }
+
+    // Render distance is a player setting that exists before any world does (it can be set from the main
+    // menu), so with no world it only changes the setting. A running world also applies it straight away.
+    private void CycleRenderDistance()
+    {
+        if (_world != null) _world.CycleRenderDistance();
+        else World.AdvanceRenderDistanceSetting();
+    }
+
+    // Ambient occlusion and leaf culling change how chunks are built, so a running world has to rebuild its
+    // meshes. With no world the new value is simply used when the next world is built. While paused the
+    // world is frozen, so the rebuild shows once the game is resumed.
+    private void OnMeshSettingChanged()
+    {
+        _world?.RemeshAll();
     }
 
     // Runs once, right after the player is placed in the world and gameplay begins.
@@ -249,7 +383,10 @@ public class Game1 : Game
         var mouse = Mouse.GetState();
         _input.Update(kb, mouse);
 
-        if (_input.WasPressed(GameAction.Quit)) Exit();
+        // Window mode works on every screen (menus included), so it's handled here rather than in Hotkeys,
+        // which only runs while playing. The window manager is created early in startup.
+        if (_windowManager != null && _input.WasPressed(GameAction.CycleWindowMode))
+            _windowManager.CycleNextMode();
 
         // Startup: run the next initialization step. Almost nothing exists yet (no world, no audio),
         // so nothing else updates until every step has run.
@@ -273,6 +410,18 @@ public class Game1 : Game
             return;
         }
 
+        // Settings: Esc goes back, same as the Back button
+        if (_state == GameState.Settings)
+        {
+            if (_input.WasPressed(GameAction.Pause))
+                CloseSettings();
+            else
+                _settingsMenu.Update(_input);
+
+            base.Update(gameTime);
+            return;
+        }
+
         if (_state == GameState.Spawning)
         {
             _world.Update(GraphicsDevice, _controller.CamPos, totalTime);
@@ -281,6 +430,34 @@ public class Game1 : Game
             base.Update(gameTime);
             return;
         }
+
+        // Paused: the world is frozen (nothing below runs), only the pause menu responds.
+        if (_state == GameState.Paused)
+        {
+            if (_input.WasPressed(GameAction.Pause))
+            {
+                _audioManager.PlayMenuSound(MenuButtonSound.Back);
+                ResumeGame();
+            }
+            else
+            {
+                _pauseMenu.Update(_input);
+            }
+
+            base.Update(gameTime);
+            return;
+        }
+
+        // Playing
+        if (_input.WasPressed(GameAction.Pause))
+        {
+            _audioManager.PlayMenuSound(MenuButtonSound.Click);
+            PauseGame();
+
+            base.Update(gameTime);
+            return;
+        }
+
         _hotkeys.Update(dt);
         _debugOverlay.Update();
         _dayNight.Update(dt);
@@ -321,6 +498,17 @@ public class Game1 : Game
             return;
         }
 
+        // Settings: over the frozen world if it was opened from the pause menu, otherwise on its own
+        if (_state == GameState.Settings)
+        {
+            bool overWorld = _settingsReturnState == GameState.Paused;
+            if (overWorld) DrawWorld(gameTime, totalTime);
+
+            _settingsMenu.Draw(_sprites, GraphicsDevice, overWorld);
+            base.Draw(gameTime);
+            return;
+        }
+
         // If the player hasn't spawned yet, render the loading screen instead of the world
         if (_state == GameState.Spawning)
         {
@@ -329,12 +517,22 @@ public class Game1 : Game
             return;
         }
 
+        // Playing or Paused: the world is drawn the same either way. When paused it simply stops changing.
+        DrawWorld(gameTime, totalTime);
+
+        // The pause menu dims everything drawn above it
+        if (_state == GameState.Paused)
+            _pauseMenu.Draw(_sprites, GraphicsDevice);
+
+        base.Draw(gameTime);
+    }
+
+    private void DrawWorld(GameTime gameTime, float totalTime)
+    {
         _renderer.Draw(totalTime);
         _screenEffects.Draw(); // after the world, before the HUD so the crosshair and hotbar stay untinted
         _hud.Draw();
         _debugOverlay.UpdateFps(gameTime);
         _debugOverlay.Draw();
-
-        base.Draw(gameTime);
     }
 }

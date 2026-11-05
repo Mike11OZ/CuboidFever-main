@@ -1,3 +1,4 @@
+
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -10,21 +11,20 @@ namespace CuboidFever;
 
 public class AudioManager
 {
-    // ---- Configuration ----
-    private const float MinDelaySeconds = 0.0f; // Minimum delay between songs (in seconds)
-    private const float MaxDelaySeconds = 30.0f; // Maximum delay between songs (in seconds)
-    // Tip: If you want a fixed, constant delay instead of a random range, 
-    // simply set MinDelaySeconds and MaxDelaySeconds to the exact same value (e.g., 5.0f).
+    // ---- Music Configuration ----
+    private const float MinDelaySeconds = 0.0f;
+    private const float MaxDelaySeconds = 30.0f;
 
-    private Dictionary<string, Song> _songs = new();
-    private Dictionary<string, SoundEffect> _soundEffects = new();
-    private List<string> _availableTrackNames = new();
-    
+    private readonly Dictionary<string, Song> _songs = new();
+    private readonly Dictionary<string, SoundEffect> _soundEffects = new();
+    private readonly List<string> _availableTrackNames = new();
+
     private float _delaySeconds;
     private float _currentDelayTimer;
-    
+
     private bool _isWaitingForDelay;
     private bool _isPlaying;
+
     private float _volume = 0.8f;
     private readonly Random _random = new();
 
@@ -41,15 +41,37 @@ public class AudioManager
     }
 
     /// <summary>
-    /// Loads tracks specified in data/cuboidfever/music_list.json and sound effects (.wav) into memory upfront.
-    /// Call this once during game startup.
+    /// Loads music tracks and sound effects into memory.
+    /// Call once during game startup.
     /// </summary>
     public void InitializePlaylist()
     {
+        string soundsDir = Path.Combine(
+            AppContext.BaseDirectory,
+            "assets",
+            "cuboidfever",
+            "sounds"
+        );
+
+        // Load sound effects independently of music.
+        if (Directory.Exists(soundsDir))
+        {
+            LoadSoundEffects(soundsDir);
+        }
+        else
+        {
+            Console.WriteLine($"[Audio] Sounds directory not found: {soundsDir}");
+        }
+
+        // Load music playlist.
         try
         {
-            string jsonPath = Path.Combine(AppContext.BaseDirectory, "data", "cuboidfever", "music_list.json");
-            string soundsDir = Path.Combine(AppContext.BaseDirectory, "assets", "cuboidfever", "sounds");
+            string jsonPath = Path.Combine(
+                AppContext.BaseDirectory,
+                "data",
+                "cuboidfever",
+                "music_list.json"
+            );
 
             if (!File.Exists(jsonPath))
             {
@@ -58,22 +80,17 @@ public class AudioManager
                 return;
             }
 
-            if (!Directory.Exists(soundsDir))
-            {
-                Console.WriteLine($"[Audio] Sounds directory not found: {soundsDir}");
-                CurrentSongName = "None (Directory Not Found)";
-                return;
-            }
-
-            // ---- Load Music Tracks (.ogg) from JSON list ----
             string jsonContent = File.ReadAllText(jsonPath);
-            List<string> trackNames = System.Text.Json.JsonSerializer.Deserialize<List<string>>(jsonContent);
+
+            List<string> trackNames =
+                System.Text.Json.JsonSerializer.Deserialize<List<string>>(jsonContent);
 
             if (trackNames != null)
             {
                 foreach (var assetName in trackNames)
                 {
                     string fullPath = Path.Combine(soundsDir, $"{assetName}.ogg");
+
                     if (!File.Exists(fullPath))
                     {
                         Console.WriteLine($"[Audio] Track file not found: {fullPath}");
@@ -82,7 +99,11 @@ public class AudioManager
 
                     try
                     {
-                        Song song = Song.FromUri(assetName, new Uri(fullPath, UriKind.Absolute));
+                        Song song = Song.FromUri(
+                            assetName,
+                            new Uri(fullPath, UriKind.Absolute)
+                        );
+
                         _songs[assetName] = song;
                         _availableTrackNames.Add(assetName);
                     }
@@ -93,27 +114,9 @@ public class AudioManager
                 }
             }
 
-            // ---- Load Sound Effects (.wav) automatically from sounds directory ----
-            var wavFiles = Directory.GetFiles(soundsDir, "*.wav")
-                .Select(Path.GetFileNameWithoutExtension)
-                .ToArray();
-
-            foreach (var assetName in wavFiles)
-            {
-                string fullPath = Path.Combine(soundsDir, $"{assetName}.wav");
-                try
-                {
-                    using var stream = File.OpenRead(fullPath);
-                    SoundEffect sfx = SoundEffect.FromStream(stream);
-                    _soundEffects[assetName] = sfx;
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[Audio] Failed to load sound effect {assetName}: {ex.Message}");
-                }
-            }
-
-            Console.WriteLine($"[Audio] Successfully preloaded {_songs.Count} music tracks and {_soundEffects.Count} sound effects.");
+            Console.WriteLine(
+                $"[Audio] Successfully preloaded {_songs.Count} music tracks and {_soundEffects.Count} sound effects."
+            );
         }
         catch (Exception ex)
         {
@@ -121,13 +124,47 @@ public class AudioManager
         }
     }
 
+    // ---- Sound Effect Loading ----
+
+    private void LoadSoundEffects(string soundsDir)
+    {
+        var wavFiles = Directory.GetFiles(
+            soundsDir,
+            "*.wav",
+            SearchOption.AllDirectories
+        );
+
+        foreach (var fullPath in wavFiles)
+        {
+            string relativePath = Path.GetRelativePath(soundsDir, fullPath);
+
+            string assetName = Path.ChangeExtension(relativePath, null)
+                .Replace('\\', '/');
+
+            try
+            {
+                using var stream = File.OpenRead(fullPath);
+
+                SoundEffect sfx = SoundEffect.FromStream(stream);
+                _soundEffects[assetName] = sfx;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Audio] Failed to load sound effect {assetName}: {ex.Message}");
+            }
+        }
+    }
+
+    // ---- Sound Effect Playback ----
+
     public void PlaySound(string soundName, float volumeScale = 1.0f)
     {
         if (_soundEffects.TryGetValue(soundName, out var sfx))
         {
             try
             {
-                sfx.Play(_volume * volumeScale, 0f, 0f);
+                float volume = MathHelper.Clamp(_volume * volumeScale, 0f, 1f);
+                sfx.Play(volume, 0f, 0f);
             }
             catch (Exception ex)
             {
@@ -135,6 +172,30 @@ public class AudioManager
             }
         }
     }
+
+    // Dedicated playback method for menu buttons.
+    public void PlayMenuSound(MenuButtonSound sound)
+    {
+        switch (sound)
+        {
+            case MenuButtonSound.Click:
+                PlaySound("ui/click");
+                break;
+
+            case MenuButtonSound.Back:
+                PlaySound("ui/back");
+                break;
+
+            case MenuButtonSound.Start:
+            PlaySound("ui/start");
+            break;
+
+            case MenuButtonSound.None:
+                break;
+        }
+    }
+
+    // ---- Music Playback ----
 
     public void StartPlaylist()
     {
@@ -147,9 +208,11 @@ public class AudioManager
         _isPlaying = true;
         _isWaitingForDelay = true;
         _currentDelayTimer = 0f;
-        _delaySeconds = MinDelaySeconds >= MaxDelaySeconds 
-            ? MinDelaySeconds 
+
+        _delaySeconds = MinDelaySeconds >= MaxDelaySeconds
+            ? MinDelaySeconds
             : (float)(_random.NextDouble() * (MaxDelaySeconds - MinDelaySeconds) + MinDelaySeconds);
+
         CurrentSongName = "None (Waiting for music...)";
     }
 
@@ -159,7 +222,10 @@ public class AudioManager
 
         try
         {
-            string assetName = _availableTrackNames[_random.Next(_availableTrackNames.Count)];
+            string assetName = _availableTrackNames[
+                _random.Next(_availableTrackNames.Count)
+            ];
+
             Song songToPlay = _songs[assetName];
 
             CurrentSongName = $"{assetName}.ogg";
@@ -176,6 +242,8 @@ public class AudioManager
         }
     }
 
+    // ---- Update ----
+
     public void Update(GameTime gameTime)
     {
         if (!_isPlaying) return;
@@ -185,11 +253,9 @@ public class AudioManager
         if (_isWaitingForDelay)
         {
             _currentDelayTimer += dt;
-            
+
             if (_currentDelayTimer >= _delaySeconds)
-            {
                 PlayRandomSong();
-            }
         }
         else
         {
@@ -197,19 +263,40 @@ public class AudioManager
             {
                 _isWaitingForDelay = true;
                 _currentDelayTimer = 0f;
-                _delaySeconds = MinDelaySeconds >= MaxDelaySeconds 
-                    ? MinDelaySeconds 
+
+                _delaySeconds = MinDelaySeconds >= MaxDelaySeconds
+                    ? MinDelaySeconds
                     : (float)(_random.NextDouble() * (MaxDelaySeconds - MinDelaySeconds) + MinDelaySeconds);
+
                 CurrentSongName = "None (Between Songs)";
             }
         }
     }
 
+    // ---- Stop ----
+
     public void Stop()
     {
         _isPlaying = false;
         _isWaitingForDelay = false;
+
         CurrentSongName = "None (Stopped)";
         MediaPlayer.Stop();
+    }
+
+    // ---- Cleanup ----
+
+    public void Dispose()
+    {
+        foreach (var sfx in _soundEffects.Values)
+            sfx.Dispose();
+
+        _soundEffects.Clear();
+
+        foreach (var song in _songs.Values)
+            song.Dispose();
+
+        _songs.Clear();
+        _availableTrackNames.Clear();
     }
 }

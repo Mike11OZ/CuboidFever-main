@@ -7,26 +7,31 @@ public sealed class Hotkeys
 
     private readonly World _world;
     private readonly DayNightCycle _dayNight;
-    private readonly WindowManager _windowManager;
     private readonly FrameRateLimiter _fps;
     private readonly ScreenshotManager _screenshotManager;
     private readonly ActionInput _input;
+    private readonly Hud _hud;
 
-    public Hotkeys(World world, DayNightCycle dayNight, WindowManager windowManager,
-                   FrameRateLimiter fps, ScreenshotManager screenshotManager, ActionInput input)
+    // Note: the window mode hotkey is not here. These hotkeys only run while playing, and the window mode
+    // has to work on every screen, so Game1 handles it.
+    public Hotkeys(World world, DayNightCycle dayNight,
+               FrameRateLimiter fps, ScreenshotManager screenshotManager,
+               ActionInput input, Hud hud)
     {
         _world = world;
         _dayNight = dayNight;
-        _windowManager = windowManager;
         _fps = fps;
         _screenshotManager = screenshotManager;
         _input = input;
+        _hud = hud;
     }
 
     public void Update(float dt)
     {
+        if (_input.WasPressed(GameAction.ToggleHud))
+            _hud.ToggleVisibility();
+
         if (_input.WasPressed(GameAction.CycleFpsCap)) _fps.CycleNext();
-        if (_input.WasPressed(GameAction.CycleWindowMode)) _windowManager.CycleNextMode();
         if (_input.WasPressed(GameAction.CycleRenderDistance)) _world.CycleRenderDistance();
         
         // Trigger screenshot via action input system

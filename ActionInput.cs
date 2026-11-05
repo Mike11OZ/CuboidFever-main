@@ -27,6 +27,11 @@ public sealed class ActionInput
     public bool WasLeftClicked =>
         _mouse.LeftButton == ButtonState.Pressed && _prevMouse.LeftButton != ButtonState.Pressed;
 
+    // True only on the frame the left button goes from down to up. Menu buttons fire on this rather than
+    // on the press, so the click can't carry into gameplay (the break-block action is hold-to-repeat).
+    public bool WasLeftReleased =>
+        _mouse.LeftButton != ButtonState.Pressed && _prevMouse.LeftButton == ButtonState.Pressed;
+
     // Call exactly once per frame, at the top of Game1.Update.
     public void Update(KeyboardState kb, MouseState mouse)
     {

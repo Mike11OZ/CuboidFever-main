@@ -39,17 +39,7 @@ public class LoadingScreen
         _pixel = new Texture2D(graphics, 1, 1);
         _pixel.SetData(new[] { Color.White });
 
-        string logoPath = Path.Combine(AppContext.BaseDirectory, "assets", "oz.png");
-
-        if (File.Exists(logoPath))
-        {
-            using var stream = File.OpenRead(logoPath);
-            _logo = Texture2D.FromStream(graphics, stream);
-        }
-        else
-        {
-            Console.WriteLine($"[Warning] Loading screen logo not found at: {logoPath}");
-        }
+        _logo = TextureLoader.Load(graphics, "oz.png");
     }
 
     // progress: 0..1 draws the progress bar at that fill level; null draws no bar at all.

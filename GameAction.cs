@@ -12,10 +12,10 @@ public enum GameAction
     Hotbar1, Hotbar2, Hotbar3, Hotbar4, Hotbar5, Hotbar6, Hotbar7, Hotbar8, Hotbar9,
 
     // Toggles and debug
-    ToggleFly, CycleFpsCap, CycleWindowMode, CycleLeafCulling, ToggleAo,
+    ToggleFly, ToggleHud, CycleFpsCap, CycleWindowMode, CycleLeafCulling, ToggleAo,
     PauseTime, ScrubTimeBack, ScrubTimeForward,
     ToggleDebugOverlay, CycleRenderDistance, Screenshot,
 
     // Application
-    Quit,
+    Pause, // pauses and unpauses while in a world (Escape by default)
 }

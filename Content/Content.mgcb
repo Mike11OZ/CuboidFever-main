@@ -12,10 +12,11 @@
 
 #---------------------------------- Content ---------------------------------#
 
-#begin DebugFont.spritefont
+#begin Fonts/DebugFont.spritefont
 /importer:FontDescriptionImporter
 /processor:FontDescriptionProcessor
-/build:DebugFont.spritefont
+/processorParam:PremultiplyAlpha=True
+/build:Fonts/DebugFont.spritefont
 
 #begin WaterShader.fx
 /importer:EffectImporter
@@ -29,7 +30,8 @@
 /processorParam:DebugMode=Auto
 /build:SolidShader.fx
 
-#begin MenuFont.spritefont
+#begin Fonts/MenuFont.spritefont
 /importer:FontDescriptionImporter
 /processor:FontDescriptionProcessor
-/build:MenuFont.spritefont
+/processorParam:PremultiplyAlpha=True
+/build:Fonts/MenuFont.spritefont

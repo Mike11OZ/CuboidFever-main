@@ -1,3 +1,4 @@
+
 using System;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
@@ -10,20 +11,36 @@ public sealed class MainMenu
 {
     private readonly SpriteFont _font;
     private readonly ButtonMenu _buttons;
+    private readonly Texture2D _backgroundTexture;
 
-    private const float TitleScale = 2.5f;
+    private const float TitleScale = 2f;
     private const float TitleTopFraction = 0.18f;
 
     public event Action PlayRequested;
     public event Action SettingsRequested;
     public event Action ExitRequested;
 
-    public MainMenu(GraphicsDevice graphics, SpriteFont font)
+    public MainMenu(
+        GraphicsDevice graphics,
+        SpriteFont font,
+        Action<MenuButtonSound> playMenuSound)
     {
         _font = font;
 
-        _buttons = new ButtonMenu(graphics, font);
-        _buttons.Add("Play Now", () => PlayRequested?.Invoke());
+        _backgroundTexture = TextureLoader.Load(
+            graphics,
+            "cuboidfever/textures/gui/main_menu_bg.png"
+        );
+
+        // Pass the audio callback to the shared button menu.
+        _buttons = new ButtonMenu(graphics, font, playMenuSound);
+
+        // All three buttons use the default click sound.
+        _buttons.Add(
+            "Play Now",
+            () => PlayRequested?.Invoke(),
+            MenuButtonSound.Start
+        );
         _buttons.Add("Settings", () => SettingsRequested?.Invoke());
         _buttons.Add("Exit Game", () => ExitRequested?.Invoke());
     }
@@ -32,24 +49,60 @@ public sealed class MainMenu
 
     public void Draw(SpriteBatch sprites, GraphicsDevice graphics)
     {
-        // Same background as the loading screen, so going between them doesn't flash
-        graphics.Clear(LoadingScreen.BackgroundColor);
-
         int screenWidth = graphics.Viewport.Width;
         int screenHeight = graphics.Viewport.Height;
 
-        // PointClamp keeps the enlarged title crisp and pixelated like the rest of the game
+        graphics.Clear(LoadingScreen.BackgroundColor);
+
+        // Background.
+        sprites.Begin(samplerState: SamplerState.LinearClamp);
+
+        if (_backgroundTexture != null)
+        {
+            var destinationRectangle = new Rectangle(
+                0, 0, screenWidth, screenHeight
+            );
+
+            sprites.Draw(_backgroundTexture, destinationRectangle, Color.White);
+        }
+
+        sprites.End();
+
+        // Pixel-style UI text and buttons.
         sprites.Begin(samplerState: SamplerState.PointClamp);
 
         if (_font != null)
         {
-            Vector2 titleSize = _font.MeasureString(GameInfo.Title) * TitleScale;
-            var titlePos = new Vector2((int)((screenWidth - titleSize.X) / 2f), (int)(screenHeight * TitleTopFraction));
-            sprites.DrawString(_font, GameInfo.Title, titlePos, Color.White, 0f, Vector2.Zero, TitleScale, SpriteEffects.None, 0f);
+            Vector2 titleSize = _font.MeasureString(GameInfo.Title);
 
-            // Version in the bottom-left corner
-            var versionPos = new Vector2(12, screenHeight - _font.LineSpacing - 8);
-            sprites.DrawString(_font, $"{GameInfo.Version} ({GameInfo.BuildType})", versionPos, new Color(90, 84, 122));
+            var titlePos = new Vector2(
+                MathF.Round((screenWidth - titleSize.X * TitleScale) / 2f),
+                MathF.Round(screenHeight * TitleTopFraction)
+            );
+
+            sprites.DrawString(
+                _font,
+                GameInfo.Title,
+                titlePos,
+                Color.White,
+                0f,
+                Vector2.Zero,
+                TitleScale,
+                SpriteEffects.None,
+                0f
+            );
+
+            var versionPos = new Vector2(
+                12,
+                screenHeight - _font.LineSpacing - 8
+            );
+
+            sprites.DrawString(
+                _font,
+                $"{GameInfo.Version} ({GameInfo.BuildType})",
+                versionPos,
+                new Color(90, 84, 122)
+            );
         }
 
         _buttons.Draw(sprites);

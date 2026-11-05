@@ -7,16 +7,25 @@ using Microsoft.Xna.Framework.Graphics;
 
 namespace CuboidFever;
 
-public class World
+public class World : IDisposable
 {
     public const int ChunksY = 8;
     public const int Height = ChunksY * Chunk.Size; // 128
     public const int SeaLevel = 64;
 
     private static readonly int[] RenderDistances = { 8, 12, 16, 20, 24, 32 };
-    private int _renderDistanceIndex = 2; // Default 16 is at index 2
+    // Static because render distance is a player setting, not part of one world: it has to be settable from
+    // the main menu before any world exists, and carry over into the next world that is created.
+    private static int _renderDistanceIndex = 2; // Default 16 is at index 2
 
-    public int LoadRadius = 16;
+    public static int RenderDistanceSetting => RenderDistances[_renderDistanceIndex];
+
+    // Moves the setting to the next distance. Use World.CycleRenderDistance instead when a world exists,
+    // since that also applies the change to the running world.
+    public static void AdvanceRenderDistanceSetting() =>
+        _renderDistanceIndex = (_renderDistanceIndex + 1) % RenderDistances.Length;
+
+    public int LoadRadius = RenderDistances[_renderDistanceIndex];
     private int UnloadRadius => LoadRadius + 2;
 
     private readonly Dictionary<(int, int), Column> _columns = new();
@@ -63,10 +72,35 @@ public class World
         _maxMeshInFlight = _pool.Count * 3;
     }
 
+    // Shuts the world down when the player leaves it (Exit World). Stops the worker threads and frees every
+    // chunk's GPU buffers. The world can't be used afterwards; a new game builds a new World.
+    public void Dispose()
+    {
+        // Waits for the jobs already running or queued to finish. The number of in-flight jobs is capped
+        // (_maxGenInFlight / _maxMeshInFlight), so this is brief.
+        _pool.Dispose();
+
+        foreach (var col in _columns.Values)
+        {
+            foreach (var chunk in col.Chunks)
+            {
+                chunk.Unloaded = true;
+                chunk.DisposeMesh();
+            }
+        }
+
+        _columns.Clear();
+        _generating.Clear();
+        _pending.Clear();
+        _urgent.Clear();
+        _inFlight.Clear();
+        _visible.Clear();
+    }
+
     public void CycleRenderDistance()
     {
-        _renderDistanceIndex = (_renderDistanceIndex + 1) % RenderDistances.Length;
-        LoadRadius = RenderDistances[_renderDistanceIndex];
+        AdvanceRenderDistanceSetting();
+        LoadRadius = RenderDistanceSetting;
         _lastCenter = (int.MinValue, 0); // Forces UnloadFar to evaluate distance changes immediately
         Console.WriteLine($"[World] Render distance cycled to: {LoadRadius} chunks");
     }

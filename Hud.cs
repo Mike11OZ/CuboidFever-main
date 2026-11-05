@@ -14,6 +14,13 @@ public sealed class Hud
     private readonly Hotbar _hotbar;
     private readonly Texture2D _pixel;
 
+    public bool Visible { get; private set; } = true;
+
+    public void ToggleVisibility()
+    {
+        Visible = !Visible;
+    }
+
     public Hud(GraphicsDevice graphicsDevice, SpriteBatch sprites, Texture2D atlas, Hotbar hotbar)
     {
         _gd = graphicsDevice;
@@ -27,6 +34,9 @@ public sealed class Hud
 
     public void Draw()
     {
+        if (!Visible)
+            return;
+
         _sprites.Begin(samplerState: SamplerState.PointClamp);
 
         DrawCrosshair();
