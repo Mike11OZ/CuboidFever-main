@@ -17,8 +17,8 @@ public class TerrainGenerator
     private const double BaseHeight = 0.2;
     private const double DepthInfluence = 2.0;
     private const double Roughness = 1.0;
-    // Keep at least 32 blocks of vertical building space above terrain.
-    private const int TerrainBuildHeightBuffer = 32;
+    // Keep at least 16 blocks of vertical building space above terrain.
+    private const int TerrainBuildHeightBuffer = 16;
 
     // Begin reducing terrain elevations this far below the hard cap.
     private const int HighAltitudeFadeDepth = 8;

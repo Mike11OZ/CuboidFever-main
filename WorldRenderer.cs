@@ -25,8 +25,7 @@ public sealed class WorldRenderer
     private readonly ParticleSystem _particles;
     private readonly DayNightCycle _dayNight;
 
-    private Texture2D _sunTexture;
-    private Texture2D _moonTexture;
+    private readonly SkyRenderer _sky;
 
     public WorldRenderer(GraphicsDevice graphicsDevice, Effect solidEffect, Effect waterEffect,
                          Texture2D atlas, World world, PlayerController controller,
@@ -52,33 +51,7 @@ public sealed class WorldRenderer
 
         _lineEffect = new BasicEffect(_gd) { VertexColorEnabled = true };
 
-        LoadAmbientTextures();
-    }
-
-    private void LoadAmbientTextures()
-    {
-        try
-        {
-            string ambientDir = Path.Combine(AppContext.BaseDirectory, "assets", "cuboidfever", "textures", "ambient");
-            
-            string sunPath = Path.Combine(ambientDir, "sol.png");
-            if (File.Exists(sunPath))
-            {
-                using var sunStream = File.OpenRead(sunPath);
-                _sunTexture = Texture2D.FromStream(_gd, sunStream);
-            }
-
-            string moonPath = Path.Combine(ambientDir, "luna.png");
-            if (File.Exists(moonPath))
-            {
-                using var moonStream = File.OpenRead(moonPath);
-                _moonTexture = Texture2D.FromStream(_gd, moonStream);
-            }
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[WorldRenderer] Failed to load ambient textures: {ex.Message}");
-        }
+        _sky = new SkyRenderer(_gd);
     }
 
     private Matrix CreateProjection() =>
@@ -102,8 +75,10 @@ public sealed class WorldRenderer
         _gd.Clear(_dayNight.SkyColor);
         _gd.SamplerStates[0] = SamplerState.PointClamp;
 
+        // Sky first, with no depth, so the world always draws over the sun and moon.
+        _sky.Draw(_effect.View, _effect.Projection, _dayNight);
+
         DrawSolid(viewProjection);
-        DrawCelestialBodies(viewProjection);
         if (_interaction.HasTarget) DrawTargetOutline(_interaction.Target);
         _particles.Draw(_gd, _effect, frustum, _controller.Right, _controller.Up);
         DrawWater(viewProjection, totalTime);
@@ -123,87 +98,6 @@ public sealed class WorldRenderer
         {
             pass.Apply();
             _world.DrawSolid(_gd);
-        }
-    }
-
-    private void DrawCelestialBodies(Matrix viewProjection)
-    {
-        if (_sunTexture == null && _moonTexture == null) return;
-
-        _gd.BlendState = BlendState.AlphaBlend;
-        _gd.DepthStencilState = DepthStencilState.DepthRead;
-        _gd.RasterizerState = RasterizerState.CullNone;
-
-        // Strip translation from the view matrix so celestial bodies rotate with 
-        // the camera (mouse look) but do not translate with player movement (WASD).
-        // This turns them into a fixed skybox that is fully multiplayer-safe.
-        Matrix skyView = _controller.View;
-        skyView.M41 = 0f;
-        skyView.M42 = 0f;
-        skyView.M43 = 0f;
-
-        _effect.View = skyView;
-        _effect.Projection = CreateProjection();
-        _effect.TextureEnabled = true;
-
-        float timeAngle = _dayNight.TimeOfDay * MathHelper.TwoPi;
-
-        // Use DayNightCycle's SunHeight for the correct vertical arc and speed, 
-        // and Sin for forward/backward sky traversal.
-        float sunY = _dayNight.SunHeight;
-        float sunZ = MathF.Sin(timeAngle);
-        float sunX = 0f;
-
-        float distance = 150f; // Distance from camera view origin
-        float size = 30f;      // Quad display size in world units
-
-        Vector3 sunDir = new Vector3(sunX, sunY, sunZ);
-        if (sunDir.LengthSquared() > 0.001f)
-        {
-            sunDir.Normalize();
-
-            // Draw Sun when it is above or near the horizon
-            if (_sunTexture != null && sunY >= -0.2f)
-            {
-                Vector3 sunPos = sunDir * distance;
-                DrawBillboardQuad(sunPos, size, _sunTexture);
-            }
-
-            // Draw Moon on the opposite side of the sky
-            if (_moonTexture != null && -sunY >= -0.2f)
-            {
-                Vector3 moonPos = -sunDir * distance;
-                DrawBillboardQuad(moonPos, size, _moonTexture);
-            }
-        }
-    }
-
-    private void DrawBillboardQuad(Vector3 center, float size, Texture2D texture)
-    {
-        _effect.Texture = texture;
-        _effect.World = Matrix.Identity;
-
-        float half = size * 0.5f;
-        Vector3 right = _controller.Right * half;
-        Vector3 up = _controller.Up * half;
-
-        var vertices = new VertexPositionColorTexture[4];
-        Color white = Color.White;
-
-        vertices[0] = new VertexPositionColorTexture(center - right + up, white, new Vector2(0, 0));
-        vertices[1] = new VertexPositionColorTexture(center + right + up, white, new Vector2(1, 0));
-        vertices[2] = new VertexPositionColorTexture(center + right - up, white, new Vector2(1, 1));
-        vertices[3] = new VertexPositionColorTexture(center - right - up, white, new Vector2(0, 1));
-
-        short[] indices = { 0, 1, 2, 0, 2, 3 };
-
-        foreach (var pass in _effect.CurrentTechnique.Passes)
-        {
-            pass.Apply();
-            _gd.DrawUserIndexedPrimitives(
-                PrimitiveType.TriangleList,
-                vertices, 0, 4,
-                indices, 0, 2);
         }
     }
 
