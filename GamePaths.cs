@@ -16,4 +16,11 @@ public static class GamePaths
 
     public static readonly string TextureAtlasConfig = Path.Combine(DataRoot, "texture_atlas.json");
     public static readonly string DayNightConfig = Path.Combine(DataRoot, "daynight.json");
+
+    // Saved worlds, one folder per world. Kept in the user's app-data folder rather than next to the
+    // executable: the build output folder is wiped by a clean or rebuild, and that must never delete saves.
+    // (Windows: %APPDATA%\CuboidFever\saves, Linux: ~/.config/CuboidFever/saves)
+    public static readonly string SavesRoot = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        "CuboidFever", "saves");
 }

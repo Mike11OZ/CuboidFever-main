@@ -282,6 +282,13 @@ public sealed class BlockRegistry
 
     public string GetName(byte id) => Get(id).Name;
 
+    // How many blocks are defined. Runtime IDs 0 .. Count - 1 are in use.
+    public int Count => _definitions.Count;
+
+    // Like GetId, but returns false instead of throwing. The save system uses it to spot blocks that a
+    // saved world mentions and this build no longer has.
+    public bool TryGetId(string name, out byte id) => _ids.TryGetValue(name, out id);
+
     public BlockDefinition Get(byte id)
     {
         if (_definitions.TryGetValue(id, out var definition))
