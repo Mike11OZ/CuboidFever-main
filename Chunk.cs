@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 
@@ -125,6 +126,87 @@ public class Chunk
                 layers[y] = layer;
             }
         }
+        _layers = layers;
+        TryCollapseChunk();
+    }
+
+    // =====================  SAVING  =====================
+
+    // Writes this chunk's blocks in the same compact shape they are stored in memory: a chunk of one block
+    // type is 2 bytes, and within a mixed chunk a layer of one block type is 2 bytes and any other layer is 257.
+    // 'map' (256 entries) converts each runtime block ID to the ID that gets stored; see BlockPalette.
+    // Call it on the main thread, or while nothing is editing this chunk, so the snapshot is consistent.
+    public void WriteBlocks(BinaryWriter writer, ReadOnlySpan<byte> map)
+    {
+        var layers = _layers;
+        if (layers == null)
+        {
+            writer.Write((byte)0);
+            writer.Write(map[_uniform]);
+            return;
+        }
+
+        writer.Write((byte)1);
+        Span<byte> buffer = stackalloc byte[Size * Size];
+
+        for (int y = 0; y < Size; y++)
+        {
+            var layer = layers[y];
+            if (layer == null)
+            {
+                writer.Write((byte)0);
+                writer.Write(map[_layerFill[y]]);
+            }
+            else
+            {
+                writer.Write((byte)1);
+                for (int i = 0; i < layer.Length; i++) buffer[i] = map[layer[i]];
+                writer.Write(buffer);
+            }
+        }
+    }
+
+    // The reverse of WriteBlocks, for a freshly created chunk. 'map' converts stored IDs to runtime IDs.
+    // Throws InvalidDataException for data that WriteBlocks could not have produced, and EndOfStreamException
+    // if the data ends early.
+    public void ReadBlocks(BinaryReader reader, ReadOnlySpan<byte> map)
+    {
+        byte kind = reader.ReadByte();
+
+        if (kind == 0)
+        {
+            _uniform = map[reader.ReadByte()];
+            _layers = null;
+            return;
+        }
+
+        if (kind != 1)
+            throw new InvalidDataException($"Unknown chunk storage kind {kind}.");
+
+        var layers = new byte[Size][];
+
+        for (int y = 0; y < Size; y++)
+        {
+            byte layerKind = reader.ReadByte();
+
+            if (layerKind == 0)
+            {
+                _layerFill[y] = map[reader.ReadByte()];
+            }
+            else if (layerKind == 1)
+            {
+                byte[] layer = reader.ReadBytes(Size * Size);
+                if (layer.Length != Size * Size) throw new EndOfStreamException();
+
+                for (int i = 0; i < layer.Length; i++) layer[i] = map[layer[i]];
+                layers[y] = layer;
+            }
+            else
+            {
+                throw new InvalidDataException($"Unknown layer storage kind {layerKind}.");
+            }
+        }
+
         _layers = layers;
         TryCollapseChunk();
     }

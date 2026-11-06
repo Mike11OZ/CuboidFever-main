@@ -34,12 +34,13 @@ These findings shape the whole plan.
 
 ## Phase 1: Column serialization
 
-- [ ] Binary column format: magic, format version, column coordinates, then the 8 chunks
-- [ ] Reuse the chunk's own compact storage (uniform chunk, uniform layer, full 256-byte layer), written through the palette
-- [ ] Deflate the result (`System.IO.Compression`, no new dependency)
-- [ ] Add export/import methods on `Chunk` (its storage fields are private)
-- [ ] Round-trip tests: build a column, serialize, deserialize, compare every block
-- [ ] Reader rejects bad magic, newer format versions and truncated data with a clear exception
+- [x] Binary column format (`ColumnSerializer`): magic, format version, column coordinates, payload size, checksum, then the chunks
+- [x] Reuse the chunk's own compact storage (uniform chunk, uniform layer, full 256-byte layer), written through the palette tables
+- [x] Deflate the payload (`System.IO.Compression`, no new dependency)
+- [x] `Chunk.WriteBlocks` / `Chunk.ReadBlocks` (its storage fields are private)
+- [x] Round-trip tests (`CuboidFever.Tests`, run with `dotnet test CuboidFever.Tests`)
+- [x] Reader rejects bad magic, wrong column, newer format versions, truncated and damaged data with `InvalidDataException`
+- [ ] Palette round trip against the real `BlockRegistry` (needs a graphics device, so it waits for an in-game check in Phase 3)
 
 ## Phase 2: Storage layout
 

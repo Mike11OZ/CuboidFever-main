@@ -41,6 +41,10 @@ public sealed class BlockPalette
     public byte ToSaved(byte runtimeId) => _toSaved[runtimeId];
     public byte ToRuntime(byte savedId) => _toRuntime[savedId];
 
+    // The same translations as whole 256-entry tables, for ColumnSerializer to look blocks up in bulk.
+    public ReadOnlySpan<byte> ToSavedTable => _toSaved;
+    public ReadOnlySpan<byte> ToRuntimeTable => _toRuntime;
+
     // A palette for a brand new world: every block in the registry, in runtime ID order.
     public static BlockPalette ForNewWorld(BlockRegistry registry) =>
         Build(registry, Array.Empty<string>());
