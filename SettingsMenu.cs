@@ -10,13 +10,24 @@ namespace CuboidFever;
 // when clicked, plus a Back button.
 public sealed class SettingsMenu
 {
+    private readonly GraphicsDevice _graphics;
     private readonly SpriteFont _font;
     private readonly ButtonMenu _buttons;
     private readonly Texture2D _pixel;
 
     private const string Title = "Settings";
     private const float TitleScale = 2f;
-    private const float TitleTopFraction = 0.10f;
+
+    // Space above the title and between the title and the buttons, in design pixels (see GuiScale)
+    private const int DesignMargin = 12;
+
+    // This menu has the most buttons, so they are a little shorter and closer together than in the
+    // other menus. That is what lets all of them, plus the title, fit in the smallest window.
+    private const int DesignButtonHeight = 40;
+    private const int DesignButtonGap = 12;
+
+    // Top of the title in pixels. Set by UpdateLayout, which also places the buttons under it.
+    private float _titleY;
 
     // How dark the overlay is when the menu is shown over the paused world.
     private const float DimAmount = 0.6f;
@@ -32,15 +43,17 @@ public sealed class SettingsMenu
         Action meshSettingChanged,
         Action<MenuButtonSound> playMenuSound)
     {
+        _graphics = graphics;
         _font = font;
 
         _pixel = new Texture2D(graphics, 1, 1);
         _pixel.SetData(new[] { Color.White });
 
+        // Where the buttons start depends on the title's height, so UpdateLayout sets Top every frame
         _buttons = new ButtonMenu(graphics, font, playMenuSound)
         {
-            Top = 0.25f,
-            WidthFraction = 0.4f
+            DesignHeight = DesignButtonHeight,
+            DesignGap = DesignButtonGap
         };
 
         _buttons.Add(() => $"Ambient Occlusion: {(ChunkMesher.AmbientOcclusion ? "On" : "Off")}", () =>
@@ -67,6 +80,11 @@ public sealed class SettingsMenu
             window.CycleNextMode
         );
 
+        _buttons.Add(
+            () => $"GUI Scale: {GuiScale.Label(graphics)}",
+            () => GuiScale.CycleSetting(graphics)
+        );
+
         // Back uses its own sound rather than the standard click sound.
         _buttons.Add(
             "Back",
@@ -84,9 +102,12 @@ public sealed class SettingsMenu
                 "Render Distance: 32 chunks",
                 "Frame Rate Limit: Unlimited",
                 "Window Mode: Borderless",
+                "GUI Scale: Auto (4)",
             };
 
-            _buttons.MinWidth = (int)longest.Max(s => font.MeasureString(s).X) + 60;
+            // Measured at scale 1, which is what DesignWidth is in. ButtonMenu multiplies it by the GUI
+            // scale, and the text is drawn at the same scale, so the fit holds at every scale.
+            _buttons.DesignWidth = (int)longest.Max(s => font.MeasureString(s).X) + 60;
         }
     }
 
@@ -94,12 +115,33 @@ public sealed class SettingsMenu
     private static string LeafCullLabel(int depth) =>
         depth <= 0 ? "Off" : $"Depth {depth}";
 
-    public void Update(ActionInput input) => _buttons.Update(input);
+    // Puts the title at the top and the buttons directly under it, both sized by the GUI scale. Done every
+    // frame because the scale (and so the title's height) changes with the window size and the GUI Scale
+    // setting. Placing the buttons from the title's measured height means they can never overlap it.
+    private void UpdateLayout()
+    {
+        int scale = GuiScale.For(_graphics);
+
+        _titleY = DesignMargin * scale;
+
+        float titleHeight = _font != null ? _font.LineSpacing * TitleScale * scale : 0f;
+        float buttonsTop = _titleY + titleHeight + DesignMargin * scale;
+
+        _buttons.Top = buttonsTop / _graphics.Viewport.Height;
+    }
+
+    public void Update(ActionInput input)
+    {
+        UpdateLayout();
+        _buttons.Update(input);
+    }
 
     // overWorld: true when opened from the pause menu. The frozen world has already been drawn,
     // so this dims it instead of clearing the screen.
     public void Draw(SpriteBatch sprites, GraphicsDevice graphics, bool overWorld)
     {
+        UpdateLayout();
+
         if (!overWorld)
             graphics.Clear(LoadingScreen.BackgroundColor);
 
@@ -119,11 +161,14 @@ public sealed class SettingsMenu
 
         if (_font != null)
         {
-            Vector2 titleSize = _font.MeasureString(Title) * TitleScale;
+            // Drawn at the GUI scale, so the title grows with the buttons
+            float titleScale = TitleScale * GuiScale.For(graphics);
+
+            Vector2 titleSize = _font.MeasureString(Title) * titleScale;
 
             var titlePos = new Vector2(
                 MathF.Round((screenWidth - titleSize.X) / 2f),
-                MathF.Round(screenHeight * TitleTopFraction)
+                MathF.Round(_titleY)
             );
 
             sprites.DrawString(
@@ -133,7 +178,7 @@ public sealed class SettingsMenu
                 Color.White,
                 0f,
                 Vector2.Zero,
-                TitleScale,
+                titleScale,
                 SpriteEffects.None,
                 0f
             );

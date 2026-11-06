@@ -35,9 +35,17 @@ public sealed class ButtonMenu
     // Where the top of the first button sits, as a fraction of the screen height.
     public float Top { get; set; } = 0.45f;
 
-    // Button width: this fraction of the screen width, but never narrower than MinWidth pixels.
-    public float WidthFraction { get; set; } = 0.25f;
-    public int MinWidth { get; set; } = 260;
+    // Button width in design pixels (as it would be in an 800x480 window). Menus with long labels raise it
+    // to fit their longest text. Like every size here it is multiplied by GuiScale when drawn.
+    public int DesignWidth { get; set; } = 260;
+
+    // Button height and the space between buttons, also in design pixels. A menu with many buttons
+    // (settings) makes these smaller so everything still fits in a small window.
+    public int DesignHeight { get; set; } = 48;
+    public int DesignGap { get; set; } = 16;
+
+    // Never let a button reach the screen edges, however small the window gets
+    private const int ScreenMargin = 20;
 
     // Colors, matching the loading screen's dark purple palette.
     private static readonly Color FillColor = new(44, 40, 62);
@@ -46,7 +54,7 @@ public sealed class ButtonMenu
     private static readonly Color BorderHoverColor = new(235, 235, 245);
     private static readonly Color TextColor = new(235, 235, 245);
 
-    private const int BorderThickness = 2;
+    private const int DesignBorder = 2;
 
     public ButtonMenu(
         GraphicsDevice graphics,
@@ -135,6 +143,10 @@ public sealed class ButtonMenu
     // The caller owns sprites.Begin/End so it can draw other things (a title) in the same batch.
     public void Draw(SpriteBatch sprites)
     {
+        // The text is drawn at the same scale as the button, so the two always keep the same proportions.
+        int scale = GuiScale.For(_graphics);
+        int borderThickness = DesignBorder * scale;
+
         for (int i = 0; i < _buttons.Count; i++)
         {
             Rectangle rect = GetRect(i);
@@ -144,10 +156,10 @@ public sealed class ButtonMenu
             sprites.Draw(_pixel, rect, border);
 
             var inner = new Rectangle(
-                rect.X + BorderThickness,
-                rect.Y + BorderThickness,
-                rect.Width - BorderThickness * 2,
-                rect.Height - BorderThickness * 2
+                rect.X + borderThickness,
+                rect.Y + borderThickness,
+                rect.Width - borderThickness * 2,
+                rect.Height - borderThickness * 2
             );
 
             sprites.Draw(_pixel, inner, hovered ? FillHoverColor : FillColor);
@@ -156,14 +168,14 @@ public sealed class ButtonMenu
 
             // Whole pixels only, so the text isn't smeared across pixel boundaries.
             string label = _buttons[i].Label();
-            Vector2 size = _font.MeasureString(label);
+            Vector2 size = _font.MeasureString(label) * scale;
 
             var pos = new Vector2(
                 (int)(rect.X + (rect.Width - size.X) / 2f),
-                (int)(rect.Y + rect.Height / 2f - _capCenterY)
+                (int)(rect.Y + rect.Height / 2f - _capCenterY * scale)
             );
 
-            sprites.DrawString(_font, label, pos, TextColor);
+            sprites.DrawString(_font, label, pos, TextColor, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
         }
     }
 
@@ -173,13 +185,11 @@ public sealed class ButtonMenu
         int screenWidth = _graphics.Viewport.Width;
         int screenHeight = _graphics.Viewport.Height;
 
-        int width = Math.Min(
-            Math.Max(MinWidth, (int)(screenWidth * WidthFraction)),
-            screenWidth - 40
-        );
+        int scale = GuiScale.For(_graphics);
 
-        int height = Math.Max(48, (int)(screenHeight * 0.075f));
-        int gap = height / 3;
+        int width = Math.Min(DesignWidth * scale, screenWidth - ScreenMargin * 2);
+        int height = DesignHeight * scale;
+        int gap = DesignGap * scale;
 
         int x = (screenWidth - width) / 2;
         int y = (int)(screenHeight * Top) + index * (height + gap);

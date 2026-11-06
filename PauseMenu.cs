@@ -41,7 +41,7 @@ public sealed class PauseMenu
         };
 
         _buttons.Add(
-            "Resume Game",
+            "Resume",
             () => ResumeRequested?.Invoke(),
             MenuButtonSound.Back
         );
@@ -75,7 +75,10 @@ public sealed class PauseMenu
 
         if (_font != null)
         {
-            Vector2 titleSize = _font.MeasureString(Title) * TitleScale;
+            // Drawn at the GUI scale, so the title grows with the buttons
+            float titleScale = TitleScale * GuiScale.For(graphics);
+
+            Vector2 titleSize = _font.MeasureString(Title) * titleScale;
 
             var titlePos = new Vector2(
                 MathF.Round((screenWidth - titleSize.X) / 2f),
@@ -89,7 +92,7 @@ public sealed class PauseMenu
                 Color.White,
                 0f,
                 Vector2.Zero,
-                TitleScale,
+                titleScale,
                 SpriteEffects.None,
                 0f
             );

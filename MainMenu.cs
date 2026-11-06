@@ -73,10 +73,14 @@ public sealed class MainMenu
 
         if (_font != null)
         {
+            // Everything is drawn at the GUI scale, so the title and version text grow with the buttons
+            int scale = GuiScale.For(graphics);
+            float titleScale = TitleScale * scale;
+
             Vector2 titleSize = _font.MeasureString(GameInfo.Title);
 
             var titlePos = new Vector2(
-                MathF.Round((screenWidth - titleSize.X * TitleScale) / 2f),
+                MathF.Round((screenWidth - titleSize.X * titleScale) / 2f),
                 MathF.Round(screenHeight * TitleTopFraction)
             );
 
@@ -87,21 +91,26 @@ public sealed class MainMenu
                 Color.White,
                 0f,
                 Vector2.Zero,
-                TitleScale,
+                titleScale,
                 SpriteEffects.None,
                 0f
             );
 
             var versionPos = new Vector2(
-                12,
-                screenHeight - _font.LineSpacing - 8
+                12 * scale,
+                screenHeight - (_font.LineSpacing + 8) * scale
             );
 
             sprites.DrawString(
                 _font,
                 $"{GameInfo.Version} ({GameInfo.BuildType})",
                 versionPos,
-                new Color(90, 84, 122)
+                new Color(90, 84, 122),
+                0f,
+                Vector2.Zero,
+                scale,
+                SpriteEffects.None,
+                0f
             );
         }
 
