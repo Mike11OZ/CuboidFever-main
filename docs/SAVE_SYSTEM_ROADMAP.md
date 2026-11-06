@@ -44,9 +44,10 @@ These findings shape the whole plan.
 
 ## Phase 2: Storage layout
 
-- [ ] `IColumnStore` interface: `TryLoad(cx, cz)`, `Save(column)`, `Delete`
-- [ ] First implementation: one file per column under `<world>/columns/`
-- [ ] Only edited columns are ever written, so file counts stay small. Region files can replace this later behind the interface
+- [x] `IColumnStore` interface: `Read`, `Write`, `Delete`, `Exists`, `ListColumns` (bytes in, bytes out; knows nothing about blocks)
+- [x] `FileColumnStore`: one file per column, `<world>/columns/c.<cx>.<cz>.cfc`, written atomically, readable while being replaced
+- [x] Only edited columns are ever written, so file counts stay small. Region files can replace this later behind the interface
+- [x] Tests for the store (`FileColumnStoreTests`), including negative coordinates and stray files
 
 ## Phase 3: World integration
 
