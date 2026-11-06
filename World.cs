@@ -9,14 +9,14 @@ namespace CuboidFever;
 
 public class World : IDisposable
 {
-    public const int ChunksY = 16;
+    public const int ChunksY = 8;
     public const int Height = ChunksY * Chunk.Size;
     public const int SeaLevel = 64;
 
     private static readonly int[] RenderDistances = { 8, 12, 16, 20, 24, 32 };
     // Static because render distance is a player setting, not part of one world: it has to be settable from
     // the main menu before any world exists, and carry over into the next world that is created.
-    private static int _renderDistanceIndex = 4; // Default 16 is at index 2
+    private static int _renderDistanceIndex = 2; // Default 16 is at index 2
 
     public static int RenderDistanceSetting => RenderDistances[_renderDistanceIndex];
 

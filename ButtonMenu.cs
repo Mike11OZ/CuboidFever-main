@@ -1,4 +1,3 @@
-
 using System;
 using System.Collections.Generic;
 using Microsoft.Xna.Framework;
@@ -101,6 +100,16 @@ public sealed class ButtonMenu
         _buttons.Add(new Button(label, onClick, sound));
     }
 
+    /// <summary>
+    /// Total height of all buttons + gaps, in pixels, at the given GUI scale.
+    /// Used by menus that need to vertically center the whole stack.
+    /// </summary>
+    public float GetTotalHeight(int scale)
+    {
+        if (_buttons.Count == 0) return 0f;
+        return (DesignHeight * _buttons.Count + DesignGap * (_buttons.Count - 1)) * scale;
+    }
+
     // Call once per frame, after ActionInput.Update.
     public void Update(ActionInput input)
     {
@@ -130,14 +139,34 @@ public sealed class ButtonMenu
             // The click may switch screens, so nothing else should run in this menu after it.
             if (pressed >= 0 && pressed == _hovered)
             {
-                Button button = _buttons[pressed];
-
-                if (button.Sound != MenuButtonSound.None)
-                    _playSound?.Invoke(button.Sound);
-
-                button.OnClick();
+                ActivateButton(pressed);
             }
         }
+
+        // Escape / GameAction.Pause automatically activates the Back button (if one exists).
+        // This gives every menu correct "go back one level" behaviour for free.
+        if (input.WasPressed(GameAction.Pause))
+        {
+            for (int i = 0; i < _buttons.Count; i++)
+            {
+                if (_buttons[i].Sound == MenuButtonSound.Back)
+                {
+                    ActivateButton(i);
+                    break;
+                }
+            }
+        }
+    }
+
+    // Shared path for both mouse clicks and Escape so the sound and action stay identical.
+    private void ActivateButton(int index)
+    {
+        Button button = _buttons[index];
+
+        if (button.Sound != MenuButtonSound.None)
+            _playSound?.Invoke(button.Sound);
+
+        button.OnClick();
     }
 
     // The caller owns sprites.Begin/End so it can draw other things (a title) in the same batch.

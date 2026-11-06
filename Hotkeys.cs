@@ -1,6 +1,5 @@
 namespace CuboidFever;
 
-// The toggle and debug shortcuts. It asks for actions, not keys, so rebinding needs no changes here.
 public sealed class Hotkeys
 {
     private const float TimeScrubHoursPerSecond = 3f;
@@ -9,24 +8,27 @@ public sealed class Hotkeys
     private readonly DayNightCycle _dayNight;
     private readonly FrameRateLimiter _fps;
     private readonly ScreenshotManager _screenshotManager;
+    private readonly ScreenshotPanoramicManager _panoramicManager;
+    private readonly PlayerController _controller;
     private readonly ActionInput _input;
     private readonly Hud _hud;
 
-    // Note: the window mode hotkey is not here. These hotkeys only run while playing, and the window mode
-    // has to work on every screen, so Game1 handles it.
     public Hotkeys(World world, DayNightCycle dayNight,
-               FrameRateLimiter fps, ScreenshotManager screenshotManager,
-               ActionInput input, Hud hud)
+                   FrameRateLimiter fps, ScreenshotManager screenshotManager,
+                   ScreenshotPanoramicManager panoramicManager, PlayerController controller,
+                   ActionInput input, Hud hud)
     {
         _world = world;
         _dayNight = dayNight;
         _fps = fps;
         _screenshotManager = screenshotManager;
+        _panoramicManager = panoramicManager;
+        _controller = controller;
         _input = input;
         _hud = hud;
     }
 
-    public void Update(float dt)
+    public void Update(float dt, float totalTime)
     {
         if (_input.WasPressed(GameAction.ToggleHud))
             _hud.ToggleVisibility();
@@ -34,12 +36,14 @@ public sealed class Hotkeys
         if (_input.WasPressed(GameAction.CycleFpsCap)) _fps.CycleNext();
         if (_input.WasPressed(GameAction.CycleRenderDistance)) _world.CycleRenderDistance();
         
-        // Trigger screenshot via action input system
         if (_input.WasPressed(GameAction.Screenshot)) _screenshotManager.CaptureScreenshot();
+        
+        if (_input.WasPressed(GameAction.ScreenshotPanoramic))
+            _panoramicManager.CapturePanoramicScreenshot(_controller.CamPos, _controller.Forward, totalTime);
 
         if (_input.WasPressed(GameAction.CycleLeafCulling))
         {
-            ChunkMesher.LeafCullDepth = (ChunkMesher.LeafCullDepth + 1) % (ChunkMesher.MaxLeafDepth + 1);
+            ChunkMesher.LeafCullDepth = (ChunkMesher.LeafCullDepth + 1) / (ChunkMesher.MaxLeafDepth + 1);
             _world.RemeshAll();
         }
 

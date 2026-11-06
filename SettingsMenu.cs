@@ -1,4 +1,3 @@
-
 using System;
 using System.Linq;
 using Microsoft.Xna.Framework;
@@ -6,31 +5,33 @@ using Microsoft.Xna.Framework.Graphics;
 
 namespace CuboidFever;
 
-// The settings screen: one button per option that shows its current value and cycles to the next value
-// when clicked, plus a Back button.
+// Multi-page settings screen.
+//
+// Category page:  Video, Audio, Controls, Back
+// Video page:     Window Mode, Frame Rate Limit, GUI Scale,
+//                 Render Distance, Leaf Culling, Ambient Occlusion, Back
+//
+// Audio and Controls are placeholders for now.
 public sealed class SettingsMenu
 {
     private readonly GraphicsDevice _graphics;
     private readonly SpriteFont _font;
-    private readonly ButtonMenu _buttons;
     private readonly Texture2D _pixel;
+
+    private readonly ButtonMenu _categoryPage;
+    private readonly ButtonMenu _videoPage;
+    private readonly ButtonMenu _audioPage;
+    private readonly ButtonMenu _controlsPage;
+    private ButtonMenu _current;
 
     private const string Title = "Settings";
     private const float TitleScale = 2f;
-
-    // Space above the title and between the title and the buttons, in design pixels (see GuiScale)
     private const int DesignMargin = 12;
-
-    // This menu has the most buttons, so they are a little shorter and closer together than in the
-    // other menus. That is what lets all of them, plus the title, fit in the smallest window.
     private const int DesignButtonHeight = 40;
     private const int DesignButtonGap = 12;
-
-    // Top of the title in pixels. Set by UpdateLayout, which also places the buttons under it.
-    private float _titleY;
-
-    // How dark the overlay is when the menu is shown over the paused world.
     private const float DimAmount = 0.6f;
+
+    private float _titleY;
 
     public event Action BackRequested;
 
@@ -49,95 +50,131 @@ public sealed class SettingsMenu
         _pixel = new Texture2D(graphics, 1, 1);
         _pixel.SetData(new[] { Color.White });
 
-        // Where the buttons start depends on the title's height, so UpdateLayout sets Top every frame
-        _buttons = new ButtonMenu(graphics, font, playMenuSound)
+        // ---------- Category page ----------
+        _categoryPage = new ButtonMenu(graphics, font, playMenuSound)
         {
             DesignHeight = DesignButtonHeight,
             DesignGap = DesignButtonGap
         };
 
-        _buttons.Add(() => $"Ambient Occlusion: {(ChunkMesher.AmbientOcclusion ? "On" : "Off")}", () =>
+        _categoryPage.Add("Video", () => _current = _videoPage);
+        _categoryPage.Add("Audio", () => _current = _audioPage);
+        _categoryPage.Add("Controls", () => _current = _controlsPage);
+        _categoryPage.Add("Back", () => BackRequested?.Invoke(), MenuButtonSound.Back);
+
+        // ---------- Video page ----------
+        _videoPage = new ButtonMenu(graphics, font, playMenuSound)
         {
-            ChunkMesher.AmbientOcclusion = !ChunkMesher.AmbientOcclusion;
-            meshSettingChanged();
-        });
+            DesignHeight = DesignButtonHeight,
+            DesignGap = DesignButtonGap
+        };
 
-        _buttons.Add(() => $"Leaf Culling: {LeafCullLabel(ChunkMesher.LeafCullDepth)}", () =>
-        {
-            ChunkMesher.LeafCullDepth = (ChunkMesher.LeafCullDepth + 1) % (ChunkMesher.MaxLeafDepth + 1);
-            meshSettingChanged();
-        });
-
-        _buttons.Add(() => $"Render Distance: {World.RenderDistanceSetting} chunks", cycleRenderDistance);
-
-        _buttons.Add(
-            () => $"Frame Rate Limit: {(fps.CurrentCap == 0 ? "Unlimited" : fps.CurrentCap.ToString())}",
-            fps.CycleNext
-        );
-
-        _buttons.Add(
+        _videoPage.Add(
             () => $"Window Mode: {window.CurrentMode}",
             window.CycleNextMode
         );
 
-        _buttons.Add(
+        _videoPage.Add(
+            () => $"Frame Rate Limit: {(fps.CurrentCap == 0 ? "Unlimited" : fps.CurrentCap.ToString())}",
+            fps.CycleNext
+        );
+
+        _videoPage.Add(
             () => $"GUI Scale: {GuiScale.Label(graphics)}",
             () => GuiScale.CycleSetting(graphics)
         );
 
-        // Back uses its own sound rather than the standard click sound.
-        _buttons.Add(
-            "Back",
-            () => BackRequested?.Invoke(),
-            MenuButtonSound.Back
+        _videoPage.Add(
+            () => $"Render Distance: {World.RenderDistanceSetting} chunks",
+            cycleRenderDistance
         );
 
-        // Make the buttons wide enough for the longest text each one can show.
+        _videoPage.Add(
+            () => $"Leaf Culling: {LeafCullLabel(ChunkMesher.LeafCullDepth)}",
+            () =>
+            {
+                ChunkMesher.LeafCullDepth = (ChunkMesher.LeafCullDepth + 1) % (ChunkMesher.MaxLeafDepth + 1);
+                meshSettingChanged();
+            }
+        );
+
+        _videoPage.Add(
+            () => $"Ambient Occlusion: {(ChunkMesher.AmbientOcclusion ? "On" : "Off")}",
+            () =>
+            {
+                ChunkMesher.AmbientOcclusion = !ChunkMesher.AmbientOcclusion;
+                meshSettingChanged();
+            }
+        );
+
+        _videoPage.Add("Back", () => _current = _categoryPage, MenuButtonSound.Back);
+
+        // ---------- Placeholder pages ----------
+        _audioPage = CreatePlaceholderPage(graphics, font, playMenuSound, "Audio settings coming soon");
+        _controlsPage = CreatePlaceholderPage(graphics, font, playMenuSound, "Controls settings coming soon");
+
+        // Only the Video page needs extra width for its long labels
         if (font != null)
         {
-            string[] longest =
+            string[] longestVideo =
             {
-                "Ambient Occlusion: Off",
-                "Leaf Culling: Depth 3",
-                "Render Distance: 32 chunks",
-                "Frame Rate Limit: Unlimited",
                 "Window Mode: Borderless",
+                "Frame Rate Limit: Unlimited",
                 "GUI Scale: Auto (4)",
+                "Render Distance: 32 chunks",
+                "Leaf Culling: Depth 3",
+                "Ambient Occlusion: Off",
             };
 
-            // Measured at scale 1, which is what DesignWidth is in. ButtonMenu multiplies it by the GUI
-            // scale, and the text is drawn at the same scale, so the fit holds at every scale.
-            _buttons.DesignWidth = (int)longest.Max(s => font.MeasureString(s).X) + 60;
+            _videoPage.DesignWidth = (int)longestVideo.Max(s => font.MeasureString(s).X) + 60;
         }
+
+        _current = _categoryPage;
     }
 
-    // 0 draws every leaf face (no culling); higher numbers cull more aggressively.
+    private ButtonMenu CreatePlaceholderPage(
+        GraphicsDevice graphics,
+        SpriteFont font,
+        Action<MenuButtonSound> playMenuSound,
+        string message)
+    {
+        var page = new ButtonMenu(graphics, font, playMenuSound)
+        {
+            DesignHeight = DesignButtonHeight,
+            DesignGap = DesignButtonGap
+        };
+
+        page.Add(message, () => { });
+        page.Add("Back", () => _current = _categoryPage, MenuButtonSound.Back);
+        return page;
+    }
+
     private static string LeafCullLabel(int depth) =>
         depth <= 0 ? "Off" : $"Depth {depth}";
 
-    // Puts the title at the top and the buttons directly under it, both sized by the GUI scale. Done every
-    // frame because the scale (and so the title's height) changes with the window size and the GUI Scale
-    // setting. Placing the buttons from the title's measured height means they can never overlap it.
     private void UpdateLayout()
     {
         int scale = GuiScale.For(_graphics);
+        int screenHeight = _graphics.Viewport.Height;
 
-        _titleY = DesignMargin * scale;
+        const float TitleTopFraction = 0.17f;
+        _titleY = screenHeight * TitleTopFraction;
 
         float titleHeight = _font != null ? _font.LineSpacing * TitleScale * scale : 0f;
-        float buttonsTop = _titleY + titleHeight + DesignMargin * scale;
+        float margin = DesignMargin * scale;
 
-        _buttons.Top = buttonsTop / _graphics.Viewport.Height;
+        float buttonsTop = _titleY + titleHeight + margin;
+        _current.Top = buttonsTop / screenHeight;
     }
 
     public void Update(ActionInput input)
     {
         UpdateLayout();
-        _buttons.Update(input);
+        _current.Update(input);   // ButtonMenu now handles Escape → Back automatically
     }
 
-    // overWorld: true when opened from the pause menu. The frozen world has already been drawn,
-    // so this dims it instead of clearing the screen.
+    public void ShowCategoryPage() => _current = _categoryPage;
+
     public void Draw(SpriteBatch sprites, GraphicsDevice graphics, bool overWorld)
     {
         UpdateLayout();
@@ -161,9 +198,7 @@ public sealed class SettingsMenu
 
         if (_font != null)
         {
-            // Drawn at the GUI scale, so the title grows with the buttons
             float titleScale = TitleScale * GuiScale.For(graphics);
-
             Vector2 titleSize = _font.MeasureString(Title) * titleScale;
 
             var titlePos = new Vector2(
@@ -184,7 +219,7 @@ public sealed class SettingsMenu
             );
         }
 
-        _buttons.Draw(sprites);
+        _current.Draw(sprites);
 
         sprites.End();
     }

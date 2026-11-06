@@ -19,6 +19,7 @@ public class Game1 : Game
     private readonly FrameRateLimiter _fps;
     private readonly ActionInput _input = new(new KeyBindings());
     private ScreenshotManager _screenshotManager = null!;
+    private ScreenshotPanoramicManager _panoramicManager = null!;
 
     // ---- Game state ----
     private enum GameState
@@ -240,23 +241,29 @@ public class Game1 : Game
         _particleSystem.Init(TextureAtlas.Instance);
 
         _world = new World(WorldSeed);
+        _controller = new PlayerController(_player, _world, _input);
+
+        _blockInteraction = new BlockInteraction(_world, _player, _controller, _hotbar, _input, _particleSystem, _dayNight, _audioManager);
+
+        _renderer = new WorldRenderer(GraphicsDevice, _solidShader, _waterShader, TextureAtlas.Instance.Texture,
+                                    _world, _controller, _blockInteraction, _particleSystem, _dayNight);
+
+        // Initialized before Hotkeys so it is never null
+        _panoramicManager = new ScreenshotPanoramicManager(GraphicsDevice, _renderer);
+
         _hotkeys = new Hotkeys(
             _world,
             _dayNight,
             _fps,
             _screenshotManager,
+            _panoramicManager,
+            _controller,
             _input,
             _hud
         );
-        _controller = new PlayerController(_player, _world, _input);
-
-        _blockInteraction = new BlockInteraction(_world, _player, _controller, _hotbar, _input, _particleSystem, _dayNight, _audioManager);
 
         _spawn = new SpawnSequence(_world, _controller, _loadingScreen);
         _spawn.Spawned += OnSpawned;
-
-        _renderer = new WorldRenderer(GraphicsDevice, _solidShader, _waterShader, TextureAtlas.Instance.Texture,
-                                    _world, _controller, _blockInteraction, _particleSystem, _dayNight);
 
         // Built last because it reads from almost everything above
         _debugOverlay = new DebugOverlay(_debugFont, _sprites, _input, _world, _player, _fps, _hotbar,
@@ -275,6 +282,7 @@ public class Game1 : Game
         _blockInteraction = null!;
         _spawn = null!;
         _renderer = null!;
+        _panoramicManager = null!;
         _debugOverlay = null!;
     }
 
@@ -284,6 +292,8 @@ public class Game1 : Game
     {
         _state = GameState.MainMenu;
         _mainMenu.ShowMainPage();
+
+        _audioManager.PlayTitleMusic();
 
         // Release the mouse so the cursor can be used to click buttons
         InputManager.SetMouseCaptured(false);
@@ -342,6 +352,7 @@ public class Game1 : Game
     private void OnSettingsRequested()
     {
         _settingsReturnState = _state;
+        _settingsMenu.ShowCategoryPage();   // ← add this line
         _state = GameState.Settings;
     }
 
@@ -377,7 +388,7 @@ public class Game1 : Game
         Mouse.SetPosition(Window.ClientBounds.Width / 2, Window.ClientBounds.Height / 2);
 
         // Kick off the initial random delay timer (1 to 5 minutes) upon spawning
-        _audioManager.StartPlaylist();
+        _audioManager.PlayGameMusic();
     }
 
     // =====================  UPDATE  =====================
@@ -412,7 +423,7 @@ public class Game1 : Game
 
         if (_state == GameState.MainMenu)
         {
-            _mainMenu.Update(_input);
+            _mainMenu.Update(_input, (float)gameTime.ElapsedGameTime.TotalSeconds);
 
             base.Update(gameTime);
             return;
@@ -421,10 +432,8 @@ public class Game1 : Game
         // Settings: Esc goes back, same as the Back button
         if (_state == GameState.Settings)
         {
-            if (_input.WasPressed(GameAction.Pause))
-                CloseSettings();
-            else
-                _settingsMenu.Update(_input);
+            // SettingsMenu now handles Escape itself (sub-page vs root)
+            _settingsMenu.Update(_input);
 
             base.Update(gameTime);
             return;
@@ -466,7 +475,7 @@ public class Game1 : Game
             return;
         }
 
-        _hotkeys.Update(dt);
+        _hotkeys.Update(dt, totalTime);
         _debugOverlay.Update();
         _dayNight.Update(dt);
         _world.SkyDarkness = _dayNight.SkyDarknessLevels;

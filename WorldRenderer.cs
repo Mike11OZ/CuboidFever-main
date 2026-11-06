@@ -7,7 +7,7 @@ namespace CuboidFever;
 // It owns the camera projection and the effects used to draw them.
 public sealed class WorldRenderer
 {
-    private const float FovDegrees = 80f;
+    public float FovDegrees { get; set; } = 80f; // Now a public property
     private const float NearPlane = 0.1f;
     private const float FarPlane = 500f;
 
@@ -24,6 +24,11 @@ public sealed class WorldRenderer
     private readonly DayNightCycle _dayNight;
 
     private readonly SkyRenderer _sky;
+
+    // ---- ADD THESE TWO METHODS HERE ----
+    public void SetProjection(Matrix projection) => _effect.Projection = projection;
+    public Matrix CurrentProjection => _effect.Projection;
+    // ------------------------------------
 
     public WorldRenderer(GraphicsDevice graphicsDevice, Effect solidEffect, Effect waterEffect,
                          Texture2D atlas, World world, PlayerController controller,
@@ -64,21 +69,31 @@ public sealed class WorldRenderer
 
     public void Draw(float totalTime)
     {
-        _effect.View = _controller.View;
+        DrawInternal(_controller.View, _controller.CamPos, _controller.Right, _controller.Up, totalTime);
+    }
+
+    public void DrawCustom(Matrix view, Vector3 camPos, float totalTime)
+    {
+        Matrix invView = Matrix.Invert(view);
+        DrawInternal(view, camPos, invView.Right, invView.Up, totalTime);
+    }
+
+    private void DrawInternal(Matrix view, Vector3 camPos, Vector3 right, Vector3 up, float totalTime)
+    {
+        _effect.View = view;
         Matrix viewProjection = _effect.View * _effect.Projection;
 
         var frustum = new BoundingFrustum(viewProjection);
-        _world.UpdateVisibility(frustum, _controller.CamPos, totalTime);
+        _world.UpdateVisibility(frustum, camPos, totalTime);
 
         _gd.Clear(_dayNight.SkyColor);
         _gd.SamplerStates[0] = SamplerState.PointClamp;
 
-        // Sky first, with no depth, so the world always draws over the sun and moon.
         _sky.Draw(_effect.View, _effect.Projection, _dayNight);
 
         DrawSolid(viewProjection);
         if (_interaction.HasTarget) DrawTargetOutline(_interaction.Target);
-        _particles.Draw(_gd, _effect, frustum, _controller.Right, _controller.Up);
+        _particles.Draw(_gd, _effect, frustum, right, up);
         DrawWater(viewProjection, totalTime);
     }
 

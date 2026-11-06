@@ -1,4 +1,3 @@
-
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -17,6 +16,8 @@ public class AudioManager
 
     private readonly Dictionary<string, Song> _songs = new();
     private readonly Dictionary<string, SoundEffect> _soundEffects = new();
+    private readonly List<string> _titleTrackNames = new();
+    private readonly List<string> _gameTrackNames = new();
     private readonly List<string> _availableTrackNames = new();
 
     private float _delaySeconds;
@@ -63,64 +64,61 @@ public class AudioManager
             Console.WriteLine($"[Audio] Sounds directory not found: {soundsDir}");
         }
 
-        // Load music playlist.
+        // Load title and game music lists independently using the DRY helper.
+        LoadMusicList(
+            Path.Combine(AppContext.BaseDirectory, "data", "cuboidfever", "music_list_title.json"),
+            _titleTrackNames,
+            soundsDir
+        );
+        LoadMusicList(
+            Path.Combine(AppContext.BaseDirectory, "data", "cuboidfever", "music_list_game.json"),
+            _gameTrackNames,
+            soundsDir
+        );
+
+        Console.WriteLine(
+            $"[Audio] Successfully preloaded {_songs.Count} music tracks and {_soundEffects.Count} sound effects."
+        );
+    }
+
+    private void LoadMusicList(string jsonPath, List<string> targetList, string soundsDir)
+    {
+        if (!File.Exists(jsonPath))
+        {
+            Console.WriteLine($"[Audio] Music list not found: {jsonPath}");
+            return;
+        }
+
         try
         {
-            string jsonPath = Path.Combine(
-                AppContext.BaseDirectory,
-                "data",
-                "cuboidfever",
-                "music_list.json"
-            );
+            var trackNames = System.Text.Json.JsonSerializer.Deserialize<List<string>>(File.ReadAllText(jsonPath));
+            if (trackNames == null) return;
 
-            if (!File.Exists(jsonPath))
+            foreach (var assetName in trackNames)
             {
-                Console.WriteLine($"[Audio] Music list JSON not found: {jsonPath}");
-                CurrentSongName = "None (Music List Not Found)";
-                return;
-            }
+                string fullPath = Path.Combine(soundsDir, $"{assetName}.ogg");
 
-            string jsonContent = File.ReadAllText(jsonPath);
-
-            List<string> trackNames =
-                System.Text.Json.JsonSerializer.Deserialize<List<string>>(jsonContent);
-
-            if (trackNames != null)
-            {
-                foreach (var assetName in trackNames)
+                if (!File.Exists(fullPath))
                 {
-                    string fullPath = Path.Combine(soundsDir, $"{assetName}.ogg");
+                    Console.WriteLine($"[Audio] Track file not found: {fullPath}");
+                    continue;
+                }
 
-                    if (!File.Exists(fullPath))
-                    {
-                        Console.WriteLine($"[Audio] Track file not found: {fullPath}");
-                        continue;
-                    }
-
-                    try
-                    {
-                        Song song = Song.FromUri(
-                            assetName,
-                            new Uri(fullPath, UriKind.Absolute)
-                        );
-
-                        _songs[assetName] = song;
-                        _availableTrackNames.Add(assetName);
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"[Audio] Failed to load track {assetName}: {ex.Message}");
-                    }
+                try
+                {
+                    Song song = Song.FromUri(assetName, new Uri(fullPath, UriKind.Absolute));
+                    _songs[assetName] = song;
+                    targetList.Add(assetName);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[Audio] Failed to load track {assetName}: {ex.Message}");
                 }
             }
-
-            Console.WriteLine(
-                $"[Audio] Successfully preloaded {_songs.Count} music tracks and {_soundEffects.Count} sound effects."
-            );
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[Audio] Failed to initialize playlist: {ex.Message}");
+            Console.WriteLine($"[Audio] Failed to load music list {jsonPath}: {ex.Message}");
         }
     }
 
@@ -187,8 +185,8 @@ public class AudioManager
                 break;
 
             case MenuButtonSound.Start:
-            PlaySound("ui/start");
-            break;
+                PlaySound("ui/start");
+                break;
 
             case MenuButtonSound.None:
                 break;
@@ -232,6 +230,7 @@ public class AudioManager
             _isPlaying = true;
             _isWaitingForDelay = false;
 
+            MediaPlayer.IsRepeating = false;
             MediaPlayer.Volume = _volume;
             MediaPlayer.Play(songToPlay);
         }
@@ -240,6 +239,50 @@ public class AudioManager
             Console.WriteLine($"[Audio] Failed to play random music track: {ex.Message}");
             CurrentSongName = "None (Error)";
         }
+    }
+
+    /// <summary>
+    /// Plays the title-screen track and loops it.
+    /// Stops any in-game playlist that was running.
+    /// </summary>
+    public void PlayTitleMusic()
+    {
+        _isPlaying = false;
+        _isWaitingForDelay = false;
+
+        if (_titleTrackNames.Count == 0)
+        {
+            CurrentSongName = "None (No title tracks)";
+            return;
+        }
+
+        string assetName = _titleTrackNames[0];
+        if (_songs.TryGetValue(assetName, out var song))
+        {
+            CurrentSongName = $"{assetName}.ogg";
+            MediaPlayer.IsRepeating = true;
+            MediaPlayer.Volume = _volume;
+            MediaPlayer.Play(song);
+        }
+        else
+        {
+            Console.WriteLine($"[Audio] Title track '{assetName}' not found.");
+            CurrentSongName = "None (Title track missing)";
+        }
+    }
+
+    /// <summary>
+    /// Starts the normal in-game random playlist (non-looping tracks + delay between songs).
+    /// </summary>
+    public void PlayGameMusic()
+    {
+        MediaPlayer.Stop();
+        MediaPlayer.IsRepeating = false;
+
+        // Point the playlist system at the game tracks
+        _availableTrackNames.Clear();
+        _availableTrackNames.AddRange(_gameTrackNames);
+        StartPlaylist();
     }
 
     // ---- Update ----
@@ -297,6 +340,8 @@ public class AudioManager
             song.Dispose();
 
         _songs.Clear();
+        _titleTrackNames.Clear();
+        _gameTrackNames.Clear();
         _availableTrackNames.Clear();
     }
 }

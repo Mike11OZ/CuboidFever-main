@@ -6,7 +6,7 @@ namespace CuboidFever;
 
 // The title screen: the game's name and a small tree of button pages.
 //
-//     Main:  Play Game, Configure, Exit Game
+//     Main:  Play Game, Settings, Exit Game
 //     Play:  Play Solo, Play Multiplayer, Back
 //     Solo:  Load World, New World, Back
 //
@@ -15,7 +15,7 @@ namespace CuboidFever;
 public sealed class MainMenu
 {
     private readonly SpriteFont _font;
-    private readonly Texture2D _backgroundTexture;
+    private readonly PanoramaBackground _panorama;
 
     // One button stack per page. _current is the page being shown and updated.
     private readonly ButtonMenu _mainPage;
@@ -28,7 +28,7 @@ public sealed class MainMenu
 
     public event Action LoadWorldRequested;  // pick a saved world
     public event Action NewWorldRequested;   // create a fresh world
-    public event Action SettingsRequested;   // the "Configure" button
+    public event Action SettingsRequested;   // the "Settings" button
     public event Action ExitRequested;
 
     public MainMenu(
@@ -38,9 +38,9 @@ public sealed class MainMenu
     {
         _font = font;
 
-        _backgroundTexture = TextureLoader.Load(
+        _panorama = new PanoramaBackground(
             graphics,
-            "cuboidfever/textures/gui/main_menu_bg.png"
+            "cuboidfever/textures/gui/menu_panorama.png"
         );
 
         // Every page passes the audio callback to its own button menu. Each has three buttons, so they all
@@ -51,11 +51,11 @@ public sealed class MainMenu
 
         // ---- Main page ----
         _mainPage.Add("Play Game", () => _current = _playPage);
-        _mainPage.Add("Configure", () => SettingsRequested?.Invoke());
+        _mainPage.Add("Settings", () => SettingsRequested?.Invoke());
         _mainPage.Add("Exit Game", () => ExitRequested?.Invoke());
 
         // ---- Play page ----
-        _playPage.Add("Play Solo", () => _current = _soloPage);
+        _playPage.Add("Singleplayer", () => _current = _soloPage);
 
         // Placeholder until multiplayer exists: it clicks like a button but goes nowhere.
         _playPage.Add("Multiplayer", () => { });
@@ -80,33 +80,24 @@ public sealed class MainMenu
     }
 
     // Goes back to the first page. Called when the title screen is entered, so leaving a world always lands
-    // on "Play Game / Configure / Exit Game" instead of a sub-menu left open earlier.
+    // on "Play Game / Settings / Exit Game" instead of a sub-menu left open earlier.
     public void ShowMainPage() => _current = _mainPage;
 
-    public void Update(ActionInput input) => _current.Update(input);
+    public void Update(ActionInput input, float deltaTime)
+    {
+        _panorama.Update(deltaTime);
+        _current.Update(input);
+    }
 
     public void Draw(SpriteBatch sprites, GraphicsDevice graphics)
     {
         int screenWidth = graphics.Viewport.Width;
         int screenHeight = graphics.Viewport.Height;
 
-        graphics.Clear(LoadingScreen.BackgroundColor);
+        // 1. Scrolling panorama (handles its own SpriteBatch)
+        _panorama.Draw(sprites, graphics);
 
-        // Background.
-        sprites.Begin(samplerState: SamplerState.LinearClamp);
-
-        if (_backgroundTexture != null)
-        {
-            var destinationRectangle = new Rectangle(
-                0, 0, screenWidth, screenHeight
-            );
-
-            sprites.Draw(_backgroundTexture, destinationRectangle, Color.White);
-        }
-
-        sprites.End();
-
-        // Pixel-style UI text and buttons.
+        // 2. UI on top
         sprites.Begin(samplerState: SamplerState.PointClamp);
 
         if (_font != null)

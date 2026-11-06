@@ -32,6 +32,7 @@ public sealed class KeyBindings
         [GameAction.CycleRenderDistance] = Keys.R,
         [GameAction.ToggleHud] = Keys.F1,
         [GameAction.ToggleDebugOverlay] = Keys.F3,
+        [GameAction.ScreenshotPanoramic] = Keys.F9,
         [GameAction.CycleWindowMode]  = Keys.F11,
         [GameAction.Screenshot] = Keys.F12,
 
