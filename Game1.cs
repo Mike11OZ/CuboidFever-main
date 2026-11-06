@@ -35,7 +35,7 @@ public class Game1 : Game
     // Where Back goes from the settings screen: MainMenu or Paused, whichever opened it
     private GameState _settingsReturnState = GameState.MainMenu;
 
-    private const int WorldSeed = 715310;
+    private const int WorldSeed = 706944;
 
     private LoadingScreen _loadingScreen = null!; // shared by every phase that shows a loading screen
     private StartupScreen _startup = null!;       // runs the initialization steps while the loading screen is up
@@ -83,7 +83,7 @@ public class Game1 : Game
     {
         // Only what the loading screen itself needs is created here, so it can be drawn right away.
         // Everything else is registered as a startup step and runs one step per frame (see StartupScreen),
-        // which is what lets the progress bar move while resources load.
+        // which is what lets the progress bar advance while resources load.
         _sprites = new SpriteBatch(GraphicsDevice);
 
         _loadingScreen = new LoadingScreen();
@@ -105,7 +105,7 @@ public class Game1 : Game
         _startup.AddStep("Menus", InitMenus);
 
         // The world, player, renderer and everything else that belongs to one particular world is not built
-        // here. It is built when the player presses Play Now (CreateWorldSession) and thrown away on
+        // here. It is built when the player starts a world (CreateWorldSession) and thrown away on
         // Exit World (DestroyWorldSession), so a player can leave a world and start a fresh one.
     }
 
@@ -193,7 +193,9 @@ public class Game1 : Game
             _audioManager.PlayMenuSound
         );
 
-        _mainMenu.PlayRequested += StartGame;
+        // Until saving exists, both world buttons do what "Play Now" used to: start a new world.
+        _mainMenu.NewWorldRequested += OnNewWorldRequested;
+        _mainMenu.LoadWorldRequested += OnLoadWorldRequested;
         _mainMenu.SettingsRequested += OnSettingsRequested;
         _mainMenu.ExitRequested += Exit;
 
@@ -224,7 +226,7 @@ public class Game1 : Game
     // =====================  WORLD SESSION  =====================
     //
     // Everything that belongs to one particular world: the world itself, the player in it, and the classes
-    // that were built holding a reference to either. Each Play Now makes a complete new set, and Exit World
+    // that were built holding a reference to either. Each time a world is started makes a complete new set, and Exit World
     // throws the set away, so nothing from one world (blocks, particles, player position, time of day) can
     // leak into the next. Things that don't depend on a world (settings, fonts, shaders, the hotbar, the
     // audio manager) are built once at startup instead.
@@ -254,7 +256,7 @@ public class Game1 : Game
         _spawn.Spawned += OnSpawned;
 
         _renderer = new WorldRenderer(GraphicsDevice, _solidShader, _waterShader, TextureAtlas.Instance.Texture,
-                                      _world, _controller, _blockInteraction, _particleSystem, _dayNight);
+                                    _world, _controller, _blockInteraction, _particleSystem, _dayNight);
 
         // Built last because it reads from almost everything above
         _debugOverlay = new DebugOverlay(_debugFont, _sprites, _input, _world, _player, _fps, _hotbar,
@@ -281,13 +283,19 @@ public class Game1 : Game
     private void EnterMainMenu()
     {
         _state = GameState.MainMenu;
+        _mainMenu.ShowMainPage();
 
         // Release the mouse so the cursor can be used to click buttons
         InputManager.SetMouseCaptured(false);
         IsMouseVisible = true;
     }
 
-    // "Play Now": build a new world, hide the cursor, recapture the mouse, and start generating.
+    // The solo menu's world buttons. Both start a fresh world for now; each gets its own handler so the
+    // save system can give them different behavior later without touching MainMenu.
+    private void OnNewWorldRequested() => StartGame();    // TODO: world creation options / new save slot
+    private void OnLoadWorldRequested() => StartGame();   // TODO: open a saved-world list
+
+    // Build a new world, hide the cursor, recapture the mouse, and start generating.
     // The world only begins generating once it starts being updated, which happens in the Spawning state.
     private void StartGame()
     {

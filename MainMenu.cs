@@ -1,23 +1,34 @@
-
 using System;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 
 namespace CuboidFever;
 
-// The title screen: the game's name and three buttons. It decides nothing itself; it raises an event
-// for each button and Game1 decides what happens (start the game, open settings, quit).
+// The title screen: the game's name and a small tree of button pages.
+//
+//     Main:  Play Game, Configure, Exit Game
+//     Play:  Play Solo, Play Multiplayer, Back
+//     Solo:  Load World, New World, Back
+//
+// Moving between pages is only navigation, so MainMenu handles it itself. Everything that actually does
+// something raises an event and Game1 decides what happens (start a world, open settings, quit).
 public sealed class MainMenu
 {
     private readonly SpriteFont _font;
-    private readonly ButtonMenu _buttons;
     private readonly Texture2D _backgroundTexture;
+
+    // One button stack per page. _current is the page being shown and updated.
+    private readonly ButtonMenu _mainPage;
+    private readonly ButtonMenu _playPage;
+    private readonly ButtonMenu _soloPage;
+    private ButtonMenu _current;
 
     private const float TitleScale = 2f;
     private const float TitleTopFraction = 0.18f;
 
-    public event Action PlayRequested;
-    public event Action SettingsRequested;
+    public event Action LoadWorldRequested;  // pick a saved world
+    public event Action NewWorldRequested;   // create a fresh world
+    public event Action SettingsRequested;   // the "Configure" button
     public event Action ExitRequested;
 
     public MainMenu(
@@ -32,20 +43,47 @@ public sealed class MainMenu
             "cuboidfever/textures/gui/main_menu_bg.png"
         );
 
-        // Pass the audio callback to the shared button menu.
-        _buttons = new ButtonMenu(graphics, font, playMenuSound);
+        // Every page passes the audio callback to its own button menu. Each has three buttons, so they all
+        // use the default layout.
+        _mainPage = new ButtonMenu(graphics, font, playMenuSound);
+        _playPage = new ButtonMenu(graphics, font, playMenuSound);
+        _soloPage = new ButtonMenu(graphics, font, playMenuSound);
 
-        // All three buttons use the default click sound.
-        _buttons.Add(
-            "Play Now",
-            () => PlayRequested?.Invoke(),
+        // ---- Main page ----
+        _mainPage.Add("Play Game", () => _current = _playPage);
+        _mainPage.Add("Configure", () => SettingsRequested?.Invoke());
+        _mainPage.Add("Exit Game", () => ExitRequested?.Invoke());
+
+        // ---- Play page ----
+        _playPage.Add("Play Solo", () => _current = _soloPage);
+
+        // Placeholder until multiplayer exists: it clicks like a button but goes nowhere.
+        _playPage.Add("Multiplayer", () => { });
+
+        _playPage.Add("Back", () => _current = _mainPage, MenuButtonSound.Back);
+
+        // ---- Solo page ----
+        // The two world buttons start a world, so they use the "Start" sound.
+        _soloPage.Add(
+            "Load World",
+            () => LoadWorldRequested?.Invoke(),
             MenuButtonSound.Start
         );
-        _buttons.Add("Settings", () => SettingsRequested?.Invoke());
-        _buttons.Add("Exit Game", () => ExitRequested?.Invoke());
+        _soloPage.Add(
+            "New World",
+            () => NewWorldRequested?.Invoke(),
+            MenuButtonSound.Start
+        );
+        _soloPage.Add("Back", () => _current = _playPage, MenuButtonSound.Back);
+
+        _current = _mainPage;
     }
 
-    public void Update(ActionInput input) => _buttons.Update(input);
+    // Goes back to the first page. Called when the title screen is entered, so leaving a world always lands
+    // on "Play Game / Configure / Exit Game" instead of a sub-menu left open earlier.
+    public void ShowMainPage() => _current = _mainPage;
+
+    public void Update(ActionInput input) => _current.Update(input);
 
     public void Draw(SpriteBatch sprites, GraphicsDevice graphics)
     {
@@ -114,7 +152,7 @@ public sealed class MainMenu
             );
         }
 
-        _buttons.Draw(sprites);
+        _current.Draw(sprites);
 
         sprites.End();
     }

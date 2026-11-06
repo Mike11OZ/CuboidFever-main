@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 namespace CuboidFever;
 
-// A 16 x 128 x 16 stack of chunks plus its light data.
+// A 16 x 256 x 16 stack of chunks plus its light data.
 public class Column
 {
     public const int Size = Chunk.Size;
