@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
@@ -42,6 +43,10 @@ public class Game1 : Game
     // The saved world being played. Null before a world starts, and for a world that could not be given a save
     // (it then plays as it did before saving existed: nothing is written).
     private WorldSave _worldSave;
+
+    // Set when the world list picture should be taken. DrawWorld takes it after the world is drawn but before the
+    // HUD, so the picture shows the view without the crosshair and hotbar.
+    private bool _thumbnailPending;
 
     private LoadingScreen _loadingScreen = null!; // shared by every phase that shows a loading screen
     private StartupScreen _startup = null!;       // runs the initialization steps while the loading screen is up
@@ -304,6 +309,7 @@ public class Game1 : Game
     {
         SaveWorld(wait: true); // before the world is disposed, because this needs its columns
 
+        _thumbnailPending = false;
         _world.Dispose(); // stops its worker threads and frees its chunk meshes
 
         // The world's workers have stopped, so nothing can read from the save any more
@@ -365,6 +371,11 @@ public class Game1 : Game
     private void CloseWorldSave()
     {
         if (_world == null) return;
+
+        // Closing while playing (no pause first): if the world has no picture yet, use the last frame on screen.
+        // An existing picture is kept, because the back buffer is not guaranteed to still hold a good frame here.
+        if (_state == GameState.Playing && _worldSave != null && !File.Exists(WorldThumbnail.PathIn(_worldSave.FolderPath)))
+            _worldSave.SaveThumbnail(ThumbnailCapture.Capture(GraphicsDevice));
 
         SaveWorld(wait: true);
         _worldSave?.Dispose();
@@ -459,6 +470,10 @@ public class Game1 : Game
 
         // The world is frozen, so this is a good moment to bring the save fully up to date
         SaveWorld(wait: false);
+
+        // The paused frame is drawn next. It is the last view of the world before the player leaves it, so it
+        // becomes the world's picture in the list.
+        _thumbnailPending = true;
 
         InputManager.SetMouseCaptured(false);
         IsMouseVisible = true;
@@ -687,6 +702,13 @@ public class Game1 : Game
     {
         _renderer.Draw(totalTime);
         _screenEffects.Draw(); // after the world, before the HUD so the crosshair and hotbar stay untinted
+
+        if (_thumbnailPending)
+        {
+            _thumbnailPending = false;
+            _worldSave?.SaveThumbnail(ThumbnailCapture.Capture(GraphicsDevice));
+        }
+
         _hud.Draw();
         _debugOverlay.UpdateFps(gameTime);
         _debugOverlay.Draw();

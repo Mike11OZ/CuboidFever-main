@@ -176,6 +176,20 @@ public sealed class WorldSave : IDisposable
     // Rewrites level.json from Info (and stamps the time). Small, so it is written right away.
     public void SaveLevel() => Info.Save(FolderPath);
 
+    // Replaces the world's list picture (PNG bytes). Small and written right away; a failure only costs the
+    // picture, so it is logged and never thrown at the caller.
+    public void SaveThumbnail(byte[] png)
+    {
+        try
+        {
+            WorldThumbnail.Write(FolderPath, png);
+        }
+        catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+        {
+            Console.Error.WriteLine($"[Save] Could not write the thumbnail: {e.Message}");
+        }
+    }
+
     // Waits until every queued column is on disk. False means at least one could not be written (see the log).
     public bool Flush() => _writer.Flush();
 
