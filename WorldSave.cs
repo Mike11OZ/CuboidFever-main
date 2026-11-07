@@ -106,6 +106,10 @@ public sealed class WorldSave : IDisposable
         return worlds;
     }
 
+    // Permanently deletes a world from the saves folder (see WorldDeletion for what is refused). The world must
+    // not be open: this is for the world list, which only exists while no world is running.
+    public static void DeleteWorld(string folderPath) => WorldDeletion.Delete(GamePaths.SavesRoot, folderPath);
+
     // "World 1", "World 2", ...: the first one no existing world is using.
     public static string NextDefaultName()
     {
