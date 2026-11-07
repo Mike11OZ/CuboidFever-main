@@ -176,6 +176,9 @@ public sealed class WorldListScreen
 
         var (first, count) = WorldListLayout.VisibleRows(_scroll, _rows.Count, m);
 
+        // Close the caller's batch; every batch opened below is closed again before this method returns
+        sprites.End();
+
         // Pass 1: row backgrounds, text and the scrollbar, nearest-neighbor like the rest of the menu
         BeginClipped(sprites, SamplerState.PointClamp, screenWidth, m);
 
@@ -198,10 +201,9 @@ public sealed class WorldListScreen
         _backMenu.Draw(sprites);
     }
 
+    // Opens a batch that only draws inside the viewport. The caller closes it with End.
     private void BeginClipped(SpriteBatch sprites, SamplerState sampler, int screenWidth, ListMetrics m)
     {
-        sprites.End();
-
         // The scissor rectangle has to stay inside the screen, however small the window gets
         int top = Math.Clamp(m.Top, 0, _graphics.Viewport.Height - 1);
         int bottom = Math.Clamp(m.Bottom, top + 1, _graphics.Viewport.Height);
