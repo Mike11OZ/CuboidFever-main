@@ -106,7 +106,10 @@ public class LightMap
                 if (!info.Transparent)
                     continue;
                     
-                int baseCost = 1;
+                // Full-strength skylight travels downward without losing brightness.
+                // All other propagation costs one level.
+                int baseCost = ch == 0 && i == 3 && l == 15 ? 0 : 1;
+
                 int extraCost = info.IsAir ? 0 : info.LightAttenuation;
 
                 int nl = l - baseCost - extraCost;
@@ -158,14 +161,13 @@ public class LightMap
                     continue;
                 }
 
-                // Calculate the maximum light this cell could have contributed
-                // to the neighbor using the same rules as Propagate().
-                int baseCost = 1;
+                // Must match Propagate(): direct full-strength skylight
+                // travels downward without losing a level.
+                int baseCost = ch == 0 && i == 3 && l == 15 ? 0 : 1;
 
-                int extraCost =
-                    neighborInfo.IsAir
-                        ? 0
-                        : neighborInfo.LightAttenuation;
+                int extraCost = neighborInfo.IsAir
+                    ? 0
+                    : neighborInfo.LightAttenuation;
 
                 int expectedLevel = l - baseCost - extraCost;
 
@@ -207,7 +209,11 @@ public class LightMap
 
             if (clear)
             {
-                if (ch == 0 && Get(0, x, y + 1, z) == 15 && BlockRegistry.Instance.Info[id].IsAir)
+                if (ch == 0 &&
+                    Get(0, x, y + 1, z) == 15 &&
+                    BlockRegistry.Instance.Info[id].Transparent &&
+                    (BlockRegistry.Instance.Info[id].IsAir ||
+                    BlockRegistry.Instance.Info[id].LightAttenuation == 0))
                 {
                     Set(0, x, y, z, 15);
                     q.Enqueue((x, y, z));
