@@ -100,6 +100,14 @@ public sealed class ButtonMenu
         _buttons.Add(new Button(label, onClick, sound));
     }
 
+    // Removes every button, so a menu whose contents change (the list of saved worlds) can be rebuilt.
+    public void Clear()
+    {
+        _buttons.Clear();
+        _hovered = -1;
+        _pressed = -1;
+    }
+
     /// <summary>
     /// Total height of all buttons + gaps, in pixels, at the given GUI scale.
     /// Used by menus that need to vertically center the whole stack.

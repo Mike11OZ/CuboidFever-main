@@ -79,7 +79,9 @@ Saving follows the Minecraft Java model: the save is kept continuously up to dat
 
 ## Phase 5: Game flow and UI
 
-- [ ] World list screen, sorted by last played, with delete
+- [x] World list screen: Load World shows the saved worlds, most recently played first, four to a page (`ButtonMenu` style)
+- [ ] Delete a world from the list (needs a confirmation step)
+- [ ] An on-screen message when a world cannot be opened (today it is only written to the console, and the list stays open)
 - [ ] New World: name and seed (blank = random)
 - [ ] Pause menu "Save and Quit to Title"
 - [ ] Brief autosave indicator in the HUD

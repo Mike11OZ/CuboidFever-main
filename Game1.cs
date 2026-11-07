@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
@@ -204,6 +205,7 @@ public class Game1 : Game
         // Until saving exists, both world buttons do what "Play Now" used to: start a new world.
         _mainMenu.NewWorldRequested += OnNewWorldRequested;
         _mainMenu.LoadWorldRequested += OnLoadWorldRequested;
+        _mainMenu.WorldSelected += OnWorldSelected;
         _mainMenu.SettingsRequested += OnSettingsRequested;
         _mainMenu.ExitRequested += Exit;
 
@@ -383,8 +385,8 @@ public class Game1 : Game
         IsMouseVisible = true;
     }
 
-    // The solo menu's world buttons. Until the world list screen exists (docs/SAVE_SYSTEM_ROADMAP.md, Phase 5),
-    // New World always makes a fresh saved world and Load World opens the one played most recently.
+    // The solo menu's world buttons. New World makes a fresh saved world right away (a screen for choosing its name
+    // and seed is still to come, docs/SAVE_SYSTEM_ROADMAP.md Phase 5). Load World shows the list of saved worlds.
     private void OnNewWorldRequested()
     {
         WorldSave save = null;
@@ -401,31 +403,38 @@ public class Game1 : Game
         StartGame(save);
     }
 
+    // Load World: look at what is on disk (most recently played first) and show it as a list.
     private void OnLoadWorldRequested()
     {
-        WorldSave save = null;
+        var entries = new List<(string FolderPath, string Name)>();
 
         try
         {
             foreach (var world in WorldSave.ListWorlds())
-            {
-                try
-                {
-                    save = WorldSave.Open(world.FolderPath);
-                    break;
-                }
-                catch (Exception e)
-                {
-                    Console.Error.WriteLine($"[Save] Could not open '{world.Info.Name}': {e.Message}");
-                }
-            }
-
-            // Nothing to load yet: start a new world so the button always does something
-            save ??= WorldSave.CreateNew(WorldSave.NextDefaultName(), WorldSeed);
+                entries.Add((world.FolderPath, world.Info.Name));
         }
         catch (Exception e)
         {
-            Console.Error.WriteLine($"[Save] Could not open a saved world, so this one will not be saved: {e.Message}");
+            Console.Error.WriteLine($"[Save] Could not list the saved worlds: {e.Message}");
+        }
+
+        _mainMenu.ShowWorldList(entries);
+    }
+
+    // A world was picked from the list.
+    private void OnWorldSelected(string folderPath)
+    {
+        WorldSave save;
+
+        try
+        {
+            save = WorldSave.Open(folderPath);
+        }
+        catch (Exception e)
+        {
+            // Stay on the list. Starting some other world instead would look as if the chosen one had been lost.
+            Console.Error.WriteLine($"[Save] Could not open the world in '{folderPath}': {e.Message}");
+            return;
         }
 
         StartGame(save);
