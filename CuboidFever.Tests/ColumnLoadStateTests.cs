@@ -118,6 +118,6 @@ public class ColumnLoadStateTests
         var column = EmptyColumn(0, 0);
         Set(column, 1, 1, 1, Stone);
 
-        Assert.Equal(0, column.FindBlocksToWake(Infos()).Count);
+        Assert.Empty(column.FindBlocksToWake(Infos()));
     }
 }

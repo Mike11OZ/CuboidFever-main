@@ -17,6 +17,11 @@ public sealed class PlayerSave
 
     public bool Flying { get; set; }
     public int SelectedHotbarSlot { get; set; }
+
+    // False if the numbers cannot be a real position (a hand-edited or damaged file), in which case the world
+    // spawns the player the normal way instead. A method rather than a property so it is not written to level.json.
+    public bool HasUsablePosition() =>
+        float.IsFinite(X) && float.IsFinite(Y) && float.IsFinite(Z) && Y > -1000f && Y < 10000f;
 }
 
 // Everything about a world that is not block data: it is level.json in the world's folder.

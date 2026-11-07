@@ -72,9 +72,10 @@ Saving follows the Minecraft Java model: the save is kept continuously up to dat
 ## Phase 4: Player and session state
 
 - [x] Time of day (done in Phase 3)
-- [ ] Save position, look direction, flying flag, selected hotbar slot into `level.json`
-- [ ] `SpawnSequence` uses the saved position when one exists instead of the fixed spawn point
-- [ ] Remove the hard-coded `WorldSeed`; the seed comes from the world
+- [x] Save position, look direction, flying flag, selected hotbar slot into `level.json` (on pause, Exit World and exit, and only once the player has spawned)
+- [x] `SpawnSequence` uses the saved position when one exists, loads the world around it, and falls back to the ground at the same X/Z if the spot is now blocked
+- [x] Loaded worlds take their seed from `level.json`. New worlds still default to the `WorldSeed` constant until Phase 5 adds a seed field
+- [ ] Remember the player's position more often than pause/exit if a crash-proof position matters (a crash currently loses movement since the last pause)
 
 ## Phase 5: Game flow and UI
 

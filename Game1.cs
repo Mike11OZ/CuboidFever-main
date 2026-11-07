@@ -255,6 +255,22 @@ public class Game1 : Game
         _world = new World(save?.Info.Seed ?? WorldSeed, save);
         _controller = new PlayerController(_player, _world, _input);
 
+        // Restore where the player was, how they were looking, and what they had selected
+        Vector3? savedFeet = null;
+        var savedPlayer = save?.Info.Player;
+        if (savedPlayer != null)
+        {
+            _player.Flying = savedPlayer.Flying;
+            _controller.SetLook(savedPlayer.Yaw, savedPlayer.Pitch);
+            _hotbar.SelectSlot(savedPlayer.SelectedHotbarSlot);
+
+            if (savedPlayer.HasUsablePosition())
+            {
+                savedFeet = new Vector3(savedPlayer.X, savedPlayer.Y, savedPlayer.Z);
+                _controller.SetLoadingCamera(savedFeet.Value);   // the world loads around the camera
+            }
+        }
+
         _blockInteraction = new BlockInteraction(_world, _player, _controller, _hotbar, _input, _particleSystem, _dayNight, _audioManager);
 
         _renderer = new WorldRenderer(GraphicsDevice, _solidShader, _waterShader, TextureAtlas.Instance.Texture,
@@ -274,7 +290,7 @@ public class Game1 : Game
             _hud
         );
 
-        _spawn = new SpawnSequence(_world, _controller, _loadingScreen);
+        _spawn = new SpawnSequence(_world, _controller, _loadingScreen, savedFeet);
         _spawn.Spawned += OnSpawned;
 
         // Built last because it reads from almost everything above
@@ -313,6 +329,22 @@ public class Game1 : Game
 
         _world.SaveAll();
         _worldSave.Info.TimeOfDay = _dayNight.TimeOfDay;
+
+        // Only once the player has been placed: until then they are at the loading camera, not anywhere real,
+        // and saving that would overwrite where they really were
+        if (_spawn != null && _spawn.HasSpawned)
+        {
+            _worldSave.Info.Player = new PlayerSave
+            {
+                X = _player.Position.X,
+                Y = _player.Position.Y,
+                Z = _player.Position.Z,
+                Yaw = _controller.Yaw,
+                Pitch = _controller.Pitch,
+                Flying = _player.Flying,
+                SelectedHotbarSlot = _hotbar.Slot
+            };
+        }
 
         try
         {

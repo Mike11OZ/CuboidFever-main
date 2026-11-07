@@ -41,6 +41,12 @@ public sealed class Hotbar
         return false; // Block is not currently in the hotbar
     }
 
+    // Selects a slot by number, for restoring a saved game. A number outside the hotbar is ignored.
+    public void SelectSlot(int slot)
+    {
+        if (slot >= 0 && slot < _ids.Length) Slot = slot;
+    }
+
     // Number keys jump to a slot, the mouse wheel scrolls through them.
     public void Update()
     {

@@ -38,11 +38,28 @@ public sealed class PlayerController
     public Vector3 Up => Vector3.Transform(Vector3.Up, Rotation);
     public Matrix View => Matrix.CreateLookAt(CamPos, CamPos + Forward, Vector3.Up);
 
+    // Where the player is looking, in radians. Saved with the world.
+    public float Yaw => _yaw;
+    public float Pitch => _pitch;
+
     // Puts the player at a position (feet) and snaps the camera to their eyes.
     public void Spawn(Vector3 feetPosition)
     {
         _player.Position = feetPosition;
         CamPos = _player.Eye;
+    }
+
+    // Where the camera sits while the world around the player loads. The world loads around the camera, so for a
+    // saved player who is far from the default spot it has to start near where they will appear.
+    public void SetLoadingCamera(Vector3 position) => CamPos = position;
+
+    // Restores a saved look direction. Values that are not real numbers are ignored.
+    public void SetLook(float yaw, float pitch)
+    {
+        if (!float.IsFinite(yaw) || !float.IsFinite(pitch)) return;
+
+        _yaw = yaw;
+        _pitch = MathHelper.Clamp(pitch, -MaxPitch, MaxPitch);
     }
 
     // Call once per frame while playing. 'windowActive' stops the mouse look when the window is unfocused.
