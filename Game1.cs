@@ -417,12 +417,12 @@ public class Game1 : Game
     // Load World: look at what is on disk (most recently played first) and show it as a list.
     private void OnLoadWorldRequested()
     {
-        var entries = new List<(string FolderPath, string Name)>();
+        var entries = new List<WorldListEntry>();
 
         try
         {
             foreach (var world in WorldSave.ListWorlds())
-                entries.Add((world.FolderPath, world.Info.Name));
+                entries.Add(new WorldListEntry(world.FolderPath, world.Info.Name, world.Info.LastPlayedUtc));
         }
         catch (Exception e)
         {

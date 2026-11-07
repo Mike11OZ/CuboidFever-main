@@ -79,13 +79,14 @@ Saving follows the Minecraft Java model: the save is kept continuously up to dat
 
 ## Phase 5: Game flow and UI
 
-- [x] World list screen: Load World shows the saved worlds, most recently played first, four to a page (`ButtonMenu` style)
+- [x] World list screen: Load World shows a scrolling list (mouse wheel and draggable scrollbar), most recently played first, one row per world with its thumbnail, name and last-played time (`WorldListScreen`)
 - [ ] Delete a world from the list (needs a confirmation step)
 - [ ] An on-screen message when a world cannot be opened (today it is only written to the console, and the list stays open)
 - [ ] New World: name and seed (blank = random)
 - [ ] Pause menu "Save and Quit to Title"
 - [ ] Brief autosave indicator in the HUD
-- [ ] World thumbnail (the panoramic screenshot code can produce one)
+- [x] World thumbnail: `thumbnail.png` in the world folder, taken from the paused frame (before the HUD is drawn) and shown in the list. Closing the window mid-play only takes one if the world has none yet
+- [ ] Make the thumbnail also refresh periodically during play (autosave), so it is current after a crash
 
 ## Phase 6: Hardening
 
