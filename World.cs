@@ -48,6 +48,7 @@ public class World : IDisposable
     private readonly TerrainGenerator _gen;
     private readonly CaveCarver _caves;
     private readonly PlacedFeatures _features;
+    private readonly WorldSave _save;
     private readonly WorkerPool _pool;
     private readonly int _maxGenInFlight, _maxMeshInFlight;
     private (int x, int z) _lastCenter = (int.MinValue, 0);
@@ -56,8 +57,11 @@ public class World : IDisposable
     private readonly BlockTickScheduler _ticks;
     public int SkyDarkness;
 
-    public World(int seed)
+    // 'save' is where edited columns are kept between sessions. Without one (null) the world behaves as it did
+    // before saving existed: edited columns are never unloaded and nothing is written to disk.
+    public World(int seed, WorldSave save = null)
     {
+        _save = save;
         _airId = BlockRegistry.Instance.GetId("cuboidfever:air");
 
         _gen = new TerrainGenerator(seed);
@@ -95,6 +99,64 @@ public class World : IDisposable
         _urgent.Clear();
         _inFlight.Clear();
         _visible.Clear();
+    }
+
+    // =====================  SAVING  =====================
+    //
+    // Edited columns are written out when they unload, every AutosaveIntervalSeconds, and by SaveAll when the
+    // player leaves the world, so the save on disk is never far behind the world. A column is turned into bytes
+    // here on the main thread (nothing can change it mid-write) and the disk write happens on WorldSave's
+    // background writer.
+
+    private const float AutosaveIntervalSeconds = 30f;
+    private const int AutosaveColumnsPerFrame = 2;
+
+    private readonly Queue<Column> _autosaveQueue = new();
+    private float _nextAutosave;
+
+    // Queues every edited column that is not saved yet. Call it when leaving the world, before Dispose, and then
+    // WorldSave.Flush to wait for the disk. Does nothing if the world has no save.
+    public void SaveAll()
+    {
+        if (_save == null) return;
+
+        foreach (var col in _columns.Values)
+            if (col.NeedsSave) SaveColumnNow(col);
+
+        _autosaveQueue.Clear();
+    }
+
+    private void SaveColumnNow(Column col)
+    {
+        if (_save == null) return;
+
+        _save.SaveColumn(col);
+        col.NeedsSave = false;
+    }
+
+    // Every AutosaveIntervalSeconds, collects the edited columns and then saves a couple per frame, so a big
+    // backlog never causes a hitch. A column that unloads before its turn was already saved by UnloadFar.
+    private void UpdateAutosave(float time)
+    {
+        if (_save == null) return;
+
+        if (_autosaveQueue.Count == 0)
+        {
+            if (time < _nextAutosave) return;
+            _nextAutosave = time + AutosaveIntervalSeconds;
+
+            foreach (var col in _columns.Values)
+                if (col.NeedsSave) _autosaveQueue.Enqueue(col);
+
+            return;
+        }
+
+        for (int i = 0; i < AutosaveColumnsPerFrame && _autosaveQueue.Count > 0; i++)
+        {
+            var col = _autosaveQueue.Dequeue();
+            if (col.NeedsSave && ReferenceEquals(GetColumn(col.CX, col.CZ), col))
+                SaveColumnNow(col);
+        }
     }
 
     public void CycleRenderDistance()
@@ -179,6 +241,7 @@ public class World : IDisposable
         BuildUrgent(device);
         DispatchMeshJobs(device, camPos);
         DrainMeshed(device);
+        UpdateAutosave(time);
     }
 
     private readonly List<(int d, int x, int z)> _cand = new();
@@ -225,6 +288,18 @@ public class World : IDisposable
     {
         try
         {
+            // A column the player has changed comes back from the save; every other column is generated from the seed
+            var loaded = _save?.TryLoadColumn(cx, cz);
+            if (loaded != null)
+            {
+                loaded.ComputeSkyLight();
+                loaded.ComputeBlockLight();
+                loaded.WakeOnLoad = loaded.FindBlocksToWake();
+
+                _generated.Enqueue(loaded);
+                return;
+            }
+
             var blocks = new byte[Chunk.Size, Height, Chunk.Size];
 
             _gen.GenerateColumn(cx, cz, blocks);
@@ -262,6 +337,15 @@ public class World : IDisposable
 
             _columns[(col.CX, col.CZ)] = col;
             Light.Stitch(col);
+
+            // Water and sand in a column loaded from disk have no schedule yet: set them going again
+            if (col.WakeOnLoad != null)
+            {
+                foreach (var (wx, wy, wz) in col.WakeOnLoad)
+                    _ticks.Wake(wx, wy, wz);
+
+                col.WakeOnLoad = null;
+            }
 
             for (int nz = -1; nz <= 1; nz++)
             for (int nx = -1; nx <= 1; nx++)
@@ -303,11 +387,15 @@ public class World : IDisposable
         {
             var c = kv.Value;
             int dx = c.CX - ccx, dz = c.CZ - ccz;
-            if (dx * dx + dz * dz > r2 && !c.Modified) _toRemove.Add(kv.Key);
+            // An edited column can only leave memory if there is a save to write it to
+            bool mustStay = c.Modified && _save == null;
+            if (dx * dx + dz * dz > r2 && !mustStay) _toRemove.Add(kv.Key);
         }
 
         foreach (var key in _toRemove)
         {
+            if (_columns[key].NeedsSave) SaveColumnNow(_columns[key]);
+
             foreach (var chunk in _columns[key].Chunks)
             {
                 chunk.Unloaded = true;
@@ -436,6 +524,7 @@ public class World : IDisposable
 
         chunk.SetBlock(lx, ly, lz, id);
         col.Modified = true;
+        col.NeedsSave = true;
 
         _urgentMode = urgent;
 

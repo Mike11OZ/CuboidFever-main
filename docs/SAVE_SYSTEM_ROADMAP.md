@@ -12,7 +12,10 @@ These findings shape the whole plan.
 2. **Block IDs are not stable.** `BlockRegistry` assigns IDs alphabetically by block name when it loads the JSON files,
    with air forced to 0. Adding or removing any block file shifts the IDs of everything after it, which would silently
    corrupt every existing save. Saves must store block *names* (a palette), never raw runtime IDs.
-3. **Lighting is derived data.** `Column.ComputeSkyLight` and `LightMap.Stitch` rebuild it, so it is never saved.
+3. **Lighting is derived data, so it is never saved, but it is not all rebuilt for free.** `Column.ComputeSkyLight` and
+   `LightMap.Stitch` rebuild sky light. Lamp and torch light (channels 1-3) is only ever set when a block is placed
+   (`LightMap.OnBlockChanged`), and generated terrain has no lamps, so a loaded column needs `ComputeBlockLight`
+   (added in Phase 3) or every lamp a player placed would go dark after a reload.
 4. **`Column.Modified` already exists** and is set in `World.SetBlock`, but today it means "never unload this column,
    there is no saving yet" (`World.UnloadFar`). Once columns can be written to disk, that rule goes away.
 5. **The block tick queue (water flow, falling sand) lives only in memory** (`BlockTickScheduler`). After a load, reactive
@@ -51,17 +54,25 @@ These findings shape the whole plan.
 
 ## Phase 3: World integration
 
-- [ ] `World` takes an optional store. `GenerateJob` loads a saved column when one exists, otherwise generates as today
-- [ ] Loaded columns still run `ComputeSkyLight`, and go through `Stitch` / `TryActivate` unchanged
-- [ ] Separate "needs saving" from "was ever modified" (a `DirtySinceSave` flag next to `Modified`)
-- [ ] Save dirty columns when they unload, then drop the "never unload modified columns" rule
-- [ ] Autosave on a timer, plus a full flush in `Dispose` / `ExitWorld` / game exit (override `OnExiting`)
-- [ ] Background writer queue so saving never stalls a frame
-- [ ] Re-wake water and gravity blocks in loaded columns so flow resumes
+Saving follows the Minecraft Java model: the save is kept continuously up to date, with no "save?" prompts.
+
+- [x] `WorldSave`: one object per world on disk (folder, `level.json`, palette, column store, writer). `World` only calls `TryLoadColumn` and `SaveColumn`, which keeps the client/server split easy later
+- [x] `World` takes an optional `WorldSave`. `GenerateJob` loads a saved column when one exists, otherwise generates as today
+- [x] Loaded columns run `ComputeSkyLight` and the new `ComputeBlockLight`, then go through `Stitch` / `TryActivate` unchanged
+- [x] `Column.NeedsSave` is separate from `Modified`; without a `WorldSave` the old "never unload modified columns" rule still applies
+- [x] Edited columns are saved when they unload, every 30 seconds (two per frame), and on pause
+- [x] Full flush on Exit World, Exit Game, Quit and window close (`Game1` hooks the `Exiting` event)
+- [x] `ColumnWriteQueue`: background writer, newest-bytes-win, queued data stays readable, retries then a final retry on flush
+- [x] Water and sand are re-woken in loaded columns (`FindBlocksToWake`, `BlockTickScheduler.Wake`) so flow resumes
+- [x] Damaged column files are copied to `<world>/corrupt/` and regenerated instead of crashing or being overwritten
+- [x] Interim menu wiring until Phase 5: New World makes "World N", Load World opens the most recently played
+- [x] Time of day is saved and restored
+- [ ] In-game check on the real game (see the checklist in the Phase 3 hand-off notes)
 
 ## Phase 4: Player and session state
 
-- [ ] Save position, look direction, flying flag, selected hotbar slot, time of day into `level.json`
+- [x] Time of day (done in Phase 3)
+- [ ] Save position, look direction, flying flag, selected hotbar slot into `level.json`
 - [ ] `SpawnSequence` uses the saved position when one exists instead of the fixed spawn point
 - [ ] Remove the hard-coded `WorldSeed`; the seed comes from the world
 
@@ -75,7 +86,8 @@ These findings shape the whole plan.
 
 ## Phase 6: Hardening
 
-- [ ] Keep a `level.json.bak` and quarantine unreadable column files instead of crashing
+- [x] Quarantine unreadable column files instead of crashing (done in Phase 3)
+- [ ] Keep a `level.json.bak` in case `level.json` itself is damaged
 - [ ] Lock file so two game instances cannot open the same world
 - [ ] Format-version migration path
 - [ ] Clear in-game message when a save mentions blocks this build does not have

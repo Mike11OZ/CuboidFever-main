@@ -70,7 +70,9 @@ public sealed class BlockTickScheduler
         }
     }
 
-    private void Wake(int x, int y, int z)
+    // Schedules the block at (x, y, z) to act, if it is a kind that does (water, sand). OnBlockChanged uses
+    // this for the block and its neighbors; World uses it to restart blocks in a column loaded from disk.
+    public void Wake(int x, int y, int z)
     {
         var handler = _handlers[(int)_info[_world.GetBlock(x, y, z)].Tick];
         if (handler == null) return;

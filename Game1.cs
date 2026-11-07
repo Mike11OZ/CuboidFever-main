@@ -38,6 +38,10 @@ public class Game1 : Game
 
     private const int WorldSeed = 706944;
 
+    // The saved world being played. Null before a world starts, and for a world that could not be given a save
+    // (it then plays as it did before saving existed: nothing is written).
+    private WorldSave _worldSave;
+
     private LoadingScreen _loadingScreen = null!; // shared by every phase that shows a loading screen
     private StartupScreen _startup = null!;       // runs the initialization steps while the loading screen is up
     private MainMenu _mainMenu = null!;
@@ -78,6 +82,9 @@ public class Game1 : Game
         _graphics.SynchronizeWithVerticalRetrace = false;
         _fps = new FrameRateLimiter(this);
         _fps.Apply();
+
+        // Closing the window, Exit Game and the main menu's Quit all end up here
+        Exiting += (_, _) => CloseWorldSave();
     }
 
     protected override void LoadContent()
@@ -232,15 +239,20 @@ public class Game1 : Game
     // leak into the next. Things that don't depend on a world (settings, fonts, shaders, the hotbar, the
     // audio manager) are built once at startup instead.
 
-    private void CreateWorldSession()
+    private void CreateWorldSession(WorldSave save)
     {
         _dayNight.Reset();
+        if (save != null)
+        {
+            _dayNight.TimeOfDay = save.Info.TimeOfDay;
+            _dayNight.Scrub(0f); // brings the sky colors in line with the restored time
+        }
         _player = new Player();
 
         _particleSystem = new ParticleSystem();
         _particleSystem.Init(TextureAtlas.Instance);
 
-        _world = new World(WorldSeed);
+        _world = new World(save?.Info.Seed ?? WorldSeed, save);
         _controller = new PlayerController(_player, _world, _input);
 
         _blockInteraction = new BlockInteraction(_world, _player, _controller, _hotbar, _input, _particleSystem, _dayNight, _audioManager);
@@ -272,7 +284,13 @@ public class Game1 : Game
 
     private void DestroyWorldSession()
     {
+        SaveWorld(wait: true); // before the world is disposed, because this needs its columns
+
         _world.Dispose(); // stops its worker threads and frees its chunk meshes
+
+        // The world's workers have stopped, so nothing can read from the save any more
+        _worldSave?.Dispose();
+        _worldSave = null;
 
         _world = null!;
         _player = null!;
@@ -284,6 +302,39 @@ public class Game1 : Game
         _renderer = null!;
         _panoramicManager = null!;
         _debugOverlay = null!;
+    }
+
+    // Writes the world's edited columns and level.json. With wait: true it also blocks until everything has
+    // reached the disk (used when the world is being left); without it the writing carries on in the background
+    // (used on pause, where a stall would be noticeable). Does nothing if there is no world or no save.
+    private void SaveWorld(bool wait)
+    {
+        if (_worldSave == null || _world == null) return;
+
+        _world.SaveAll();
+        _worldSave.Info.TimeOfDay = _dayNight.TimeOfDay;
+
+        try
+        {
+            _worldSave.SaveLevel();
+        }
+        catch (Exception e)
+        {
+            Console.Error.WriteLine($"[Save] Could not write level.json: {e.Message}");
+        }
+
+        if (wait && !_worldSave.Flush())
+            Console.Error.WriteLine("[Save] Some columns could not be written to disk. See the errors above.");
+    }
+
+    // The game is closing (window closed, Exit Game, Quit): save the world if one is open.
+    private void CloseWorldSave()
+    {
+        if (_world == null) return;
+
+        SaveWorld(wait: true);
+        _worldSave?.Dispose();
+        _worldSave = null;
     }
 
     // =====================  STATE CHANGES  =====================
@@ -300,16 +351,60 @@ public class Game1 : Game
         IsMouseVisible = true;
     }
 
-    // The solo menu's world buttons. Both start a fresh world for now; each gets its own handler so the
-    // save system can give them different behavior later without touching MainMenu.
-    private void OnNewWorldRequested() => StartGame();    // TODO: world creation options / new save slot
-    private void OnLoadWorldRequested() => StartGame();   // TODO: open a saved-world list
-
-    // Build a new world, hide the cursor, recapture the mouse, and start generating.
-    // The world only begins generating once it starts being updated, which happens in the Spawning state.
-    private void StartGame()
+    // The solo menu's world buttons. Until the world list screen exists (docs/SAVE_SYSTEM_ROADMAP.md, Phase 5),
+    // New World always makes a fresh saved world and Load World opens the one played most recently.
+    private void OnNewWorldRequested()
     {
-        CreateWorldSession();
+        WorldSave save = null;
+
+        try
+        {
+            save = WorldSave.CreateNew(WorldSave.NextDefaultName(), WorldSeed);
+        }
+        catch (Exception e)
+        {
+            Console.Error.WriteLine($"[Save] Could not create a saved world, so this one will not be saved: {e.Message}");
+        }
+
+        StartGame(save);
+    }
+
+    private void OnLoadWorldRequested()
+    {
+        WorldSave save = null;
+
+        try
+        {
+            foreach (var world in WorldSave.ListWorlds())
+            {
+                try
+                {
+                    save = WorldSave.Open(world.FolderPath);
+                    break;
+                }
+                catch (Exception e)
+                {
+                    Console.Error.WriteLine($"[Save] Could not open '{world.Info.Name}': {e.Message}");
+                }
+            }
+
+            // Nothing to load yet: start a new world so the button always does something
+            save ??= WorldSave.CreateNew(WorldSave.NextDefaultName(), WorldSeed);
+        }
+        catch (Exception e)
+        {
+            Console.Error.WriteLine($"[Save] Could not open a saved world, so this one will not be saved: {e.Message}");
+        }
+
+        StartGame(save);
+    }
+
+    // Build the world (from a save, or without one), hide the cursor, recapture the mouse, and start generating.
+    // The world only begins generating once it starts being updated, which happens in the Spawning state.
+    private void StartGame(WorldSave save)
+    {
+        _worldSave = save;
+        CreateWorldSession(save);
 
         InputManager.SetMouseCaptured(true);
         IsMouseVisible = false;
@@ -320,6 +415,9 @@ public class Game1 : Game
     private void PauseGame()
     {
         _state = GameState.Paused;
+
+        // The world is frozen, so this is a good moment to bring the save fully up to date
+        SaveWorld(wait: false);
 
         InputManager.SetMouseCaptured(false);
         IsMouseVisible = true;
