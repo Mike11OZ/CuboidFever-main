@@ -114,7 +114,7 @@ public sealed class WorldSave : IDisposable
 
         foreach (string folder in Directory.EnumerateDirectories(root))
         {
-            if (!File.Exists(WorldInfo.PathIn(folder))) continue;
+            if (!WorldInfo.Exists(folder)) continue;
 
             try
             {

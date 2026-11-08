@@ -27,7 +27,7 @@ public static class WorldDeletion
             if (!Directory.Exists(full)) return false;
             if ((new DirectoryInfo(full).Attributes & FileAttributes.ReparsePoint) != 0) return false;
 
-            return File.Exists(WorldInfo.PathIn(full));
+            return WorldInfo.Exists(full);
         }
         catch (Exception e) when (e is IOException || e is UnauthorizedAccessException || e is ArgumentException || e is NotSupportedException)
         {

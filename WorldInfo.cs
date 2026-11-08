@@ -60,11 +60,21 @@ public sealed class WorldInfo
 
     public static string PathIn(string worldDirectory) => Path.Combine(worldDirectory, FileName);
 
-    // Reads level.json from a world's folder. Throws if it is missing, unreadable, or was written by a newer
-    // version of the game than this one (loading it could damage the world).
-    public static WorldInfo Load(string worldDirectory)
+    // The copy of the previous level.json, kept in case the main one is ever lost or damaged
+    public const string BackupFileName = FileName + ".bak";
+
+    public static string BackupPathIn(string worldDirectory) => Path.Combine(worldDirectory, BackupFileName);
+
+    // True if the folder has a level.json or at least a backup of one, so it is a world that can be listed
+    public static bool Exists(string worldDirectory) =>
+        File.Exists(PathIn(worldDirectory)) || File.Exists(BackupPathIn(worldDirectory));
+
+    // Reads one file. Returns the world info, or null with the reason in `error`. `newer` is set when the file is
+    // fine but was written by a newer version of the game (see Load: that is never "repaired" from a backup).
+    private static WorldInfo Read(string path, out Exception error, out bool newer)
     {
-        string path = PathIn(worldDirectory);
+        error = null;
+        newer = false;
 
         WorldInfo info;
         try
@@ -73,28 +83,96 @@ public sealed class WorldInfo
         }
         catch (JsonException e)
         {
-            throw new InvalidDataException($"{path} is not valid: {e.Message}", e);
+            error = new InvalidDataException($"{path} is not valid: {e.Message}", e);
+            return null;
+        }
+        catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+        {
+            error = e;
+            return null;
         }
 
         if (info == null)
-            throw new InvalidDataException($"{path} is empty.");
+        {
+            error = new InvalidDataException($"{path} is empty.");
+            return null;
+        }
 
         if (info.FormatVersion > CurrentFormatVersion)
-            throw new InvalidDataException(
+        {
+            newer = true;
+            error = new InvalidDataException(
                 $"{path} was saved by a newer version of the game (save format {info.FormatVersion}, " +
                 $"this build reads up to {CurrentFormatVersion}).");
+            return null;
+        }
 
         info.BlockNames ??= new List<string>();
         return info;
     }
 
+    // Reads level.json from a world's folder. Throws if it is missing, unreadable, or was written by a newer
+    // version of the game than this one (loading it could damage the world).
+    //
+    // If level.json is missing or damaged but level.json.bak is fine, the backup is used instead (and put back as
+    // level.json), so one bad file does not make a world unopenable. A file from a newer game is not treated as
+    // damaged: falling back to an older backup would quietly drop that game's changes.
+    public static WorldInfo Load(string worldDirectory)
+    {
+        string path = PathIn(worldDirectory);
+
+        WorldInfo info = Read(path, out Exception error, out bool newer);
+        if (info != null) return info;
+        if (newer) throw error;
+
+        string backupPath = BackupPathIn(worldDirectory);
+        if (File.Exists(backupPath))
+        {
+            WorldInfo backup = Read(backupPath, out _, out _);
+            if (backup != null)
+            {
+                Console.Error.WriteLine($"[Save] {path} could not be read ({error.Message}); using the backup instead.");
+
+                try
+                {
+                    AtomicFile.WriteAllText(path, JsonSerializer.Serialize(backup, JsonOptions));
+                }
+                catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+                {
+                    Console.Error.WriteLine($"[Save] Could not restore {path} from the backup: {e.Message}");
+                }
+
+                return backup;
+            }
+        }
+
+        throw error;
+    }
+
     // Writes level.json into the world's folder (creating the folder if needed) and stamps the save time.
+    // The level.json being replaced is first kept as level.json.bak, but only if it is itself readable, so a
+    // damaged file can never overwrite a good backup.
     public void Save(string worldDirectory)
     {
         FormatVersion = CurrentFormatVersion;
         GameVersion = GameInfo.Version;
         LastPlayedUtc = DateTime.UtcNow;
 
-        AtomicFile.WriteAllText(PathIn(worldDirectory), JsonSerializer.Serialize(this, JsonOptions));
+        string path = PathIn(worldDirectory);
+
+        if (File.Exists(path) && Read(path, out _, out _) != null)
+        {
+            try
+            {
+                AtomicFile.WriteAllBytes(BackupPathIn(worldDirectory), File.ReadAllBytes(path));
+            }
+            catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+            {
+                // The backup is a bonus: failing to make one must not stop the real save
+                Console.Error.WriteLine($"[Save] Could not update the level.json backup: {e.Message}");
+            }
+        }
+
+        AtomicFile.WriteAllText(path, JsonSerializer.Serialize(this, JsonOptions));
     }
 }

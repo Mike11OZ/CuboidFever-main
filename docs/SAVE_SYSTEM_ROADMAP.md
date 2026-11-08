@@ -91,7 +91,7 @@ Saving follows the Minecraft Java model: the save is kept continuously up to dat
 ## Phase 6: Hardening
 
 - [x] Quarantine unreadable column files instead of crashing (done in Phase 3)
-- [ ] Keep a `level.json.bak` in case `level.json` itself is damaged
+- [x] `level.json.bak`: each save keeps the previous readable level.json as a backup; a missing or damaged level.json is restored from it on open. A file from a newer game is never "repaired" from an older backup
 - [x] Lock so two game instances cannot open the same world (`WorldLock`: an exclusive file handle on `session.lock`, released by the operating system even after a crash). Deleting a world that is open elsewhere is refused before anything is removed
 - [ ] Format-version migration path
 - [ ] Clear in-game message when a save mentions blocks this build does not have
