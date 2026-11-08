@@ -166,6 +166,17 @@ public class WorldListLayoutTests
     }
 
     [Fact]
+    public void DeleteButton_IsWideEnoughForItsLabel()
+    {
+        var plain = WorldListLayout.DeleteButtonRect(0, 0, 440, 72, 1);
+        var wide = WorldListLayout.DeleteButtonRect(0, 0, 440, 72, 1, labelWidth: 100);
+
+        Assert.True(wide.width >= 100 + 16);
+        Assert.True(wide.width > plain.width);
+        Assert.True(wide.x + wide.width < 440); // still inside the row
+    }
+
+    [Fact]
     public void DeleteButton_GrowsWithTheScale()
     {
         var one = WorldListLayout.DeleteButtonRect(0, 0, 440, 72, 1);

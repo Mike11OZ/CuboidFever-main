@@ -207,12 +207,21 @@ public sealed class ButtonMenu
             string label = _buttons[i].Label();
             Vector2 size = _font.MeasureString(label) * scale;
 
+            // A label wider than its button is drawn smaller so it fits, instead of running off the sides
+            float textScale = scale;
+            float room = rect.Width - borderThickness * 2 - 8 * scale;
+            if (size.X > room && size.X > 0)
+            {
+                textScale = scale * room / size.X;
+                size *= room / size.X;
+            }
+
             var pos = new Vector2(
                 (int)(rect.X + (rect.Width - size.X) / 2f),
-                (int)(rect.Y + rect.Height / 2f - _capCenterY * scale)
+                (int)(rect.Y + rect.Height / 2f - _capCenterY * textScale)
             );
 
-            sprites.DrawString(_font, label, pos, TextColor, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
+            sprites.DrawString(_font, label, pos, TextColor, 0f, Vector2.Zero, textScale, SpriteEffects.None, 0f);
         }
     }
 

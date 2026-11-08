@@ -35,3 +35,9 @@
 /processor:FontDescriptionProcessor
 /processorParam:PremultiplyAlpha=True
 /build:Fonts/MenuFont.spritefont
+
+#begin Fonts/MenuFontSmall.spritefont
+/importer:FontDescriptionImporter
+/processor:FontDescriptionProcessor
+/processorParam:PremultiplyAlpha=True
+/build:Fonts/MenuFontSmall.spritefont

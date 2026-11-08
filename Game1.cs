@@ -73,6 +73,7 @@ public class Game1 : Game
     private SpriteBatch _sprites = null!; // shared with LoadingScreen, Hud and DebugOverlay
     private SpriteFont _debugFont = null!;
     private SpriteFont _menuFont = null!; // larger font for menus and buttons
+    private SpriteFont _menuFontSmall = null!; // half the size: for text inside list rows and dialogs
     private Effect _solidShader = null!;  // loaded once at startup, reused by every world's renderer
     private Effect _waterShader = null!;
     
@@ -157,6 +158,17 @@ public class Game1 : Game
             Console.WriteLine($"[Warning] MenuFont.xnb not found, using the debug font for menus. ({ex.Message})");
             _menuFont = _debugFont;
         }
+
+        // The small menu font is optional too: without it the list screens simply use the larger one
+        try
+        {
+            _menuFontSmall = Content.Load<SpriteFont>("Fonts/MenuFontSmall");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Warning] MenuFontSmall.xnb not found, using the menu font. ({ex.Message})");
+            _menuFontSmall = _menuFont;
+        }
     }
 
     private void InitBlockRegistry()
@@ -204,6 +216,7 @@ public class Game1 : Game
         _mainMenu = new MainMenu(
             GraphicsDevice,
             _menuFont,
+            _menuFontSmall,
             _audioManager.PlayMenuSound
         );
 

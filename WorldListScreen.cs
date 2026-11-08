@@ -26,7 +26,8 @@ public sealed class WorldListScreen
     }
 
     private readonly GraphicsDevice _graphics;
-    private readonly SpriteFont _font; // may be null if no font could be loaded
+    private readonly SpriteFont _font; // the large menu font, for the heading; may be null if no font could be loaded
+    private readonly SpriteFont _text; // the small menu font, for row text and the delete question
     private readonly Action<MenuButtonSound> _playSound;
     private readonly Texture2D _pixel;
     private readonly ButtonMenu _backMenu;
@@ -65,12 +66,13 @@ public sealed class WorldListScreen
 
     private const int DesignBorder = 2;
     private const int DesignMinScrollbarThumb = 24;
-    private const float TitleScale = 2f;
+    private const float TitleScale = 1f;
 
-    public WorldListScreen(GraphicsDevice graphics, SpriteFont font, Action<MenuButtonSound> playSound)
+    public WorldListScreen(GraphicsDevice graphics, SpriteFont font, SpriteFont smallFont, Action<MenuButtonSound> playSound)
     {
         _graphics = graphics;
         _font = font;
+        _text = smallFont ?? font;
         _playSound = playSound;
 
         _pixel = new Texture2D(graphics, 1, 1);
@@ -81,7 +83,7 @@ public sealed class WorldListScreen
         _backMenu.Add("Back", () => BackRequested?.Invoke(), MenuButtonSound.Back);
 
         // The question's two buttons. Cancel is the "Back" button, so Escape cancels.
-        _confirmMenu = new ButtonMenu(graphics, font, playSound) { Top = 0.5f };
+        _confirmMenu = new ButtonMenu(graphics, font, playSound) { Top = 0.5f, DesignWidth = 340 };
         _confirmMenu.Add("Delete World", ConfirmDelete);
         _confirmMenu.Add("Cancel", () => _confirmIndex = -1, MenuButtonSound.Back);
     }
@@ -202,7 +204,8 @@ public sealed class WorldListScreen
     private Rectangle DeleteButtonRect(int index, ListMetrics m, int scale)
     {
         Rectangle row = RowRect(index, m);
-        var (x, y, w, h) = WorldListLayout.DeleteButtonRect(row.X, row.Y, row.Width, row.Height, scale);
+        int labelWidth = _text == null ? 0 : (int)(_text.MeasureString("Delete").X * scale);
+        var (x, y, w, h) = WorldListLayout.DeleteButtonRect(row.X, row.Y, row.Width, row.Height, scale, labelWidth);
         return new Rectangle(x, y, w, h);
     }
 
@@ -270,17 +273,19 @@ public sealed class WorldListScreen
         int screenHeight = _graphics.Viewport.Height;
         sprites.Draw(_pixel, new Rectangle(0, 0, screenWidth, screenHeight), Color.Black * 0.75f);
 
-        if (_font != null)
+        if (_text != null)
         {
             string name = FitText(WorldListLayout.DisplayName(_rows[_confirmIndex].Entry.Name),
                                   screenWidth - 2 * WorldListLayout.ScreenMargin * scale, scale);
 
             int middle = (int)(screenHeight * 0.5f);
-            int line = (_font.LineSpacing + 8) * scale;
+            int line = (_text.LineSpacing + 8) * scale;
 
             DrawCentered(sprites, "Delete this world?", screenWidth, middle - 3 * line, scale, TextColor);
             DrawCentered(sprites, name, screenWidth, middle - 2 * line, scale, TextColor);
-            DrawCentered(sprites, "It will be gone for good. This cannot be undone.", screenWidth, middle - line, scale, DimTextColor);
+            string warning = FitText("It will be gone for good. This cannot be undone.",
+                                     screenWidth - 2 * WorldListLayout.ScreenMargin * scale, scale);
+            DrawCentered(sprites, warning, screenWidth, middle - line, scale, DimTextColor);
         }
 
         _confirmMenu.Draw(sprites);
@@ -315,12 +320,12 @@ public sealed class WorldListScreen
 
     private void DrawCentered(SpriteBatch sprites, string text, int screenWidth, int centerY, int scale, Color color)
     {
-        if (_font == null) return;
+        if (_text == null) return;
 
-        Vector2 size = _font.MeasureString(text) * scale;
+        Vector2 size = _text.MeasureString(text) * scale;
         var pos = new Vector2(MathF.Round((screenWidth - size.X) / 2f), MathF.Round(centerY - size.Y / 2f));
 
-        sprites.DrawString(_font, text, pos, color, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
+        sprites.DrawString(_text, text, pos, color, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
     }
 
     private Rectangle RowRect(int index, ListMetrics m) =>
@@ -348,7 +353,7 @@ public sealed class WorldListScreen
         Rectangle picture = PictureRect(inner);
         sprites.Draw(_pixel, picture, PlaceholderColor);
 
-        if (_font == null) return;
+        if (_text == null) return;
 
         WorldListEntry entry = _rows[index].Entry;
 
@@ -359,11 +364,13 @@ public sealed class WorldListScreen
         string name = FitText(WorldListLayout.DisplayName(entry.Name), maxWidth, scale);
         string played = FitText("Last played: " + FormatLastPlayed(entry.LastPlayedUtc), maxWidth, scale);
 
-        int nameY = inner.Y + 8 * scale;
-        int playedY = nameY + (_font.LineSpacing + 6) * scale;
+        // The two lines of text are centered vertically in the row
+        int blockHeight = (2 * _text.LineSpacing + 6) * scale;
+        int nameY = inner.Y + (inner.Height - blockHeight) / 2;
+        int playedY = nameY + (_text.LineSpacing + 6) * scale;
 
-        sprites.DrawString(_font, name, new Vector2(textX, nameY), TextColor, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
-        sprites.DrawString(_font, played, new Vector2(textX, playedY), DimTextColor, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
+        sprites.DrawString(_text, name, new Vector2(textX, nameY), TextColor, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
+        sprites.DrawString(_text, played, new Vector2(textX, playedY), DimTextColor, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
 
         // Delete button: dark red, brighter when the mouse is on it
         bool deleteHot = hovered && _hoverDelete;
@@ -374,11 +381,11 @@ public sealed class WorldListScreen
             new Rectangle(delete.X + border, delete.Y + border, delete.Width - border * 2, delete.Height - border * 2),
             deleteHot ? DeleteHoverColor : DeleteColor);
 
-        Vector2 labelSize = _font.MeasureString("Delete") * scale;
+        Vector2 labelSize = _text.MeasureString("Delete") * scale;
         var labelPos = new Vector2(
             (int)(delete.X + (delete.Width - labelSize.X) / 2f),
             (int)(delete.Y + (delete.Height - labelSize.Y) / 2f));
-        sprites.DrawString(_font, "Delete", labelPos, TextColor, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
+        sprites.DrawString(_text, "Delete", labelPos, TextColor, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
     }
 
     // The thumbnail is 16:9 and as tall as the inside of the row
@@ -436,17 +443,17 @@ public sealed class WorldListScreen
     {
         var fitted = new System.Text.StringBuilder(text.Length);
         foreach (char c in text)
-            fitted.Append(_font.Characters.Contains(c) ? c : '?');
+            fitted.Append(_text.Characters.Contains(c) ? c : '?');
 
         string result = fitted.ToString();
-        if (_font.MeasureString(result).X * scale <= maxWidth) return result;
+        if (_text.MeasureString(result).X * scale <= maxWidth) return result;
 
         while (result.Length > 1)
         {
             result = result.Substring(0, result.Length - 1);
             string candidate = result.TrimEnd() + "...";
 
-            if (_font.MeasureString(candidate).X * scale <= maxWidth) return candidate;
+            if (_text.MeasureString(candidate).X * scale <= maxWidth) return candidate;
         }
 
         return result;

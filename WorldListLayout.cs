@@ -151,15 +151,17 @@ public static class WorldListLayout
 
     // =====================  DELETE BUTTON  =====================
 
-    // The "Delete" button inside a row: right-aligned, vertically centered. Takes the row's rectangle and the
-    // GUI scale, and returns x, y, width, height.
-    public static (int x, int y, int width, int height) DeleteButtonRect(int rowX, int rowY, int rowWidth, int rowHeight, int scale)
+    // The "Delete" button inside a row: right-aligned, vertically centered. Takes the row's rectangle, the GUI
+    // scale and the width of its label in pixels, and returns x, y, width, height. The button is wide enough
+    // for its label, so the text can never run past its edges.
+    public static (int x, int y, int width, int height) DeleteButtonRect(
+        int rowX, int rowY, int rowWidth, int rowHeight, int scale, int labelWidth = 0)
     {
         scale = Math.Max(1, scale);
 
         int border = 2 * scale;  // the row's border
         int margin = 8 * scale;
-        int width = 60 * scale;
+        int width = Math.Max(60 * scale, labelWidth + 16 * scale);
         int height = 24 * scale;
 
         return (rowX + rowWidth - border - margin - width, rowY + (rowHeight - height) / 2, width, height);

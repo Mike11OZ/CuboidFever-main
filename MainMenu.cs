@@ -43,6 +43,7 @@ public sealed class MainMenu
     public MainMenu(
         GraphicsDevice graphics,
         SpriteFont font,
+        SpriteFont smallFont,
         Action<MenuButtonSound> playMenuSound)
     {
         _font = font;
@@ -58,7 +59,7 @@ public sealed class MainMenu
         _playPage = new ButtonMenu(graphics, font, playMenuSound);
         _soloPage = new ButtonMenu(graphics, font, playMenuSound);
 
-        _worldList = new WorldListScreen(graphics, font, playMenuSound);
+        _worldList = new WorldListScreen(graphics, font, smallFont, playMenuSound);
         _worldList.WorldSelected += folder => WorldSelected?.Invoke(folder);
         _worldList.DeleteRequested += folder => DeleteWorldRequested?.Invoke(folder);
         _worldList.BackRequested += () =>
@@ -161,22 +162,26 @@ public sealed class MainMenu
                 );
             }
 
-            var versionPos = new Vector2(
-                12 * scale,
-                screenHeight - (_font.LineSpacing + 8) * scale
-            );
+            // Left out on the world list, where the Back button would sit on top of it
+            if (!_showingWorldList)
+            {
+                var versionPos = new Vector2(
+                    12 * scale,
+                    screenHeight - (_font.LineSpacing + 8) * scale
+                );
 
-            sprites.DrawString(
-                _font,
-                $"{GameInfo.Version} ({GameInfo.BuildType})",
-                versionPos,
-                new Color(90, 84, 122),
-                0f,
-                Vector2.Zero,
-                scale,
-                SpriteEffects.None,
-                0f
-            );
+                sprites.DrawString(
+                    _font,
+                    $"{GameInfo.Version} ({GameInfo.BuildType})",
+                    versionPos,
+                    new Color(90, 84, 122),
+                    0f,
+                    Vector2.Zero,
+                    scale,
+                    SpriteEffects.None,
+                    0f
+                );
+            }
         }
 
         if (_showingWorldList) _worldList.Draw(sprites);
