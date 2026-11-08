@@ -18,12 +18,10 @@ namespace CuboidFever;
 public sealed class MainMenu
 {
     private readonly SpriteFont _font;
-    private readonly SpriteFont _smallFont;
     private readonly PanoramaBackground _panorama;
-    private readonly Texture2D _pixel;
 
     // A message that fades away by itself ("Could not open 'World 3': ..."), shown over whatever screen is open
-    private readonly NoticeModel _notice = new();
+    private readonly NoticeBanner _notice;
 
     // One button stack per page. _current is the page being shown and updated.
     private readonly ButtonMenu _mainPage;
@@ -58,10 +56,7 @@ public sealed class MainMenu
         Action<MenuButtonSound> playMenuSound)
     {
         _font = font;
-        _smallFont = smallFont ?? font;
-
-        _pixel = new Texture2D(graphics, 1, 1);
-        _pixel.SetData(new[] { Color.White });
+        _notice = new NoticeBanner(graphics, smallFont ?? font);
 
         _panorama = new PanoramaBackground(
             graphics,
@@ -162,36 +157,6 @@ public sealed class MainMenu
         else _current.Update(input);
     }
 
-    // The message box: a few lines of small text on a dark red panel across the top of the screen, over the
-    // heading for the few seconds it is there. Fades out over its last second.
-    private void DrawNotice(SpriteBatch sprites, int screenWidth, int scale)
-    {
-        if (!_notice.IsActive || _smallFont == null) return;
-
-        float fade = _notice.Opacity;
-
-        int padding = 10 * scale;
-        int width = Math.Min(520 * scale, screenWidth - 2 * WorldListLayout.ScreenMargin);
-        var lines = TextWrap.Wrap(_notice.Text, s => _smallFont.MeasureString(s).X * scale, width - 2 * padding, 3);
-        if (lines.Count == 0) return;
-
-        int lineHeight = _smallFont.LineSpacing * scale;
-        int height = lines.Count * lineHeight + 2 * padding;
-        var box = new Rectangle((screenWidth - width) / 2, 8 * scale, width, height);
-
-        sprites.Draw(_pixel, box, new Color(140, 70, 82) * fade);
-        int border = 2 * scale;
-        sprites.Draw(_pixel,
-            new Rectangle(box.X + border, box.Y + border, box.Width - 2 * border, box.Height - 2 * border),
-            new Color(60, 26, 36) * fade);
-
-        for (int i = 0; i < lines.Count; i++)
-        {
-            sprites.DrawString(_smallFont, lines[i], new Vector2(box.X + padding, box.Y + padding + i * lineHeight),
-                new Color(245, 235, 238) * fade, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
-        }
-    }
-
     public void Draw(SpriteBatch sprites, GraphicsDevice graphics)
     {
         int screenWidth = graphics.Viewport.Width;
@@ -258,7 +223,7 @@ public sealed class MainMenu
         else if (_showingWorldList) _worldList.Draw(sprites);
         else _current.Draw(sprites);
 
-        DrawNotice(sprites, screenWidth, GuiScale.For(graphics));
+        _notice.Draw(sprites);
 
         sprites.End();
     }

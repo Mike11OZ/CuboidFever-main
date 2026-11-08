@@ -19,6 +19,9 @@ public sealed class WorldSave : IDisposable
     public WorldInfo Info { get; }
     public BlockPalette Palette { get; }
 
+    // Blocks the world was saved with that this version of the game does not have (they load as air)
+    public IReadOnlyList<string> MissingBlocks => Palette.MissingBlocks;
+
     private readonly FileColumnStore _store;
     private readonly ColumnWriteQueue _writer;
     private readonly WorldLock _lock; // held for as long as the world is open, so no other copy of the game can open it

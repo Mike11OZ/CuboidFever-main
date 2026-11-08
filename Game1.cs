@@ -48,6 +48,9 @@ public class Game1 : Game
     // HUD, so the picture shows the view without the crosshair and hotbar.
     private bool _thumbnailPending;
 
+    // Messages shown while playing, such as the missing-blocks warning
+    private NoticeBanner _gameNotice = null!;
+
     private LoadingScreen _loadingScreen = null!; // shared by every phase that shows a loading screen
     private StartupScreen _startup = null!;       // runs the initialization steps while the loading screen is up
     private MainMenu _mainMenu = null!;
@@ -221,6 +224,8 @@ public class Game1 : Game
 
     private void InitMenus()
     {
+        _gameNotice = new NoticeBanner(GraphicsDevice, _menuFontSmall);
+
         _mainMenu = new MainMenu(
             GraphicsDevice,
             _menuFont,
@@ -512,6 +517,9 @@ public class Game1 : Game
         _worldSave = save;
         CreateWorldSession(save);
 
+        string missing = save == null ? null : MissingBlocksMessage.Make(save.MissingBlocks);
+        if (missing != null) _gameNotice.Show(missing, 10f); // a long message: give it time to be read
+
         InputManager.SetMouseCaptured(true);
         IsMouseVisible = false;
         _state = GameState.Spawning;
@@ -609,6 +617,8 @@ public class Game1 : Game
         var kb = Keyboard.GetState();
         var mouse = Mouse.GetState();
         _input.Update(kb, mouse);
+
+        _gameNotice?.Update(dt);
 
         // Window mode works on every screen (menus included), so it's handled here rather than in Hotkeys,
         // which only runs while playing. The window manager is created early in startup.
@@ -738,6 +748,12 @@ public class Game1 : Game
         if (_state == GameState.Spawning)
         {
             _spawn.DrawSplash(_sprites, GraphicsDevice);
+
+            // The loading splash can take a few seconds; the world's warnings should not run out behind it
+            _sprites.Begin(samplerState: SamplerState.PointClamp);
+            _gameNotice.Draw(_sprites);
+            _sprites.End();
+
             base.Draw(gameTime);
             return;
         }
@@ -748,6 +764,10 @@ public class Game1 : Game
         // The pause menu dims everything drawn above it
         if (_state == GameState.Paused)
             _pauseMenu.Draw(_sprites, GraphicsDevice);
+
+        _sprites.Begin(samplerState: SamplerState.PointClamp);
+        _gameNotice.Draw(_sprites);
+        _sprites.End();
 
         base.Draw(gameTime);
     }
