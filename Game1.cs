@@ -211,6 +211,7 @@ public class Game1 : Game
         _mainMenu.NewWorldRequested += OnNewWorldRequested;
         _mainMenu.LoadWorldRequested += OnLoadWorldRequested;
         _mainMenu.WorldSelected += OnWorldSelected;
+        _mainMenu.DeleteWorldRequested += OnDeleteWorldRequested;
         _mainMenu.SettingsRequested += OnSettingsRequested;
         _mainMenu.ExitRequested += Exit;
 
@@ -415,7 +416,25 @@ public class Game1 : Game
     }
 
     // Load World: look at what is on disk (most recently played first) and show it as a list.
-    private void OnLoadWorldRequested()
+    private void OnLoadWorldRequested() => ShowSavedWorlds(keepScroll: false);
+
+    // The player confirmed deleting a world from the list. The list is shown again either way, so it always
+    // matches what is on disk. (A failure is only written to the console until the on-screen message exists.)
+    private void OnDeleteWorldRequested(string folderPath)
+    {
+        try
+        {
+            WorldSave.DeleteWorld(folderPath);
+        }
+        catch (Exception e)
+        {
+            Console.Error.WriteLine($"[Save] Could not delete '{folderPath}': {e.Message}");
+        }
+
+        ShowSavedWorlds(keepScroll: true);
+    }
+
+    private void ShowSavedWorlds(bool keepScroll)
     {
         var entries = new List<WorldListEntry>();
 
@@ -429,7 +448,7 @@ public class Game1 : Game
             Console.Error.WriteLine($"[Save] Could not list the saved worlds: {e.Message}");
         }
 
-        _mainMenu.ShowWorldList(entries);
+        _mainMenu.ShowWorldList(entries, keepScroll);
     }
 
     // A world was picked from the list.

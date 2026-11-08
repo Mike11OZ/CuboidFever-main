@@ -149,6 +149,22 @@ public static class WorldListLayout
         return (int)((long)thumbTop * MaxScroll(itemCount, m) / travel);
     }
 
+    // =====================  DELETE BUTTON  =====================
+
+    // The "Delete" button inside a row: right-aligned, vertically centered. Takes the row's rectangle and the
+    // GUI scale, and returns x, y, width, height.
+    public static (int x, int y, int width, int height) DeleteButtonRect(int rowX, int rowY, int rowWidth, int rowHeight, int scale)
+    {
+        scale = Math.Max(1, scale);
+
+        int border = 2 * scale;  // the row's border
+        int margin = 8 * scale;
+        int width = 60 * scale;
+        int height = 24 * scale;
+
+        return (rowX + rowWidth - border - margin - width, rowY + (rowHeight - height) / 2, width, height);
+    }
+
     // =====================  TEXT  =====================
 
     // The name to show for a world: surrounding spaces removed, and "(unnamed)" for a blank name.

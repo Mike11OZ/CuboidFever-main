@@ -156,6 +156,26 @@ public class WorldListLayoutTests
     }
 
     [Fact]
+    public void DeleteButton_SitsInsideTheRowOnTheRight()
+    {
+        var (x, y, w, h) = WorldListLayout.DeleteButtonRect(100, 200, 440, 72, 1);
+
+        Assert.True(x > 100 + 440 / 2);          // right half of the row
+        Assert.True(x + w < 100 + 440);          // inside the right edge
+        Assert.Equal(200 + (72 - h) / 2, y);     // centered vertically
+    }
+
+    [Fact]
+    public void DeleteButton_GrowsWithTheScale()
+    {
+        var one = WorldListLayout.DeleteButtonRect(0, 0, 440, 72, 1);
+        var two = WorldListLayout.DeleteButtonRect(0, 0, 880, 144, 2);
+
+        Assert.Equal(one.width * 2, two.width);
+        Assert.Equal(one.height * 2, two.height);
+    }
+
+    [Fact]
     public void DisplayName_TrimsAndLabelsBlankNames()
     {
         Assert.Equal("My World", WorldListLayout.DisplayName("  My World "));

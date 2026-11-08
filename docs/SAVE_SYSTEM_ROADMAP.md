@@ -80,7 +80,7 @@ Saving follows the Minecraft Java model: the save is kept continuously up to dat
 ## Phase 5: Game flow and UI
 
 - [x] World list screen: Load World shows a scrolling list (mouse wheel and draggable scrollbar), most recently played first, one row per world with its thumbnail, name and last-played time (`WorldListScreen`)
-- [ ] Delete a world from the list (needs a confirmation step)
+- [x] Delete a world from the list: a Delete button on each row, then a "This cannot be undone" confirmation (`WorldDeletion` refuses anything that is not a world folder directly inside the saves folder)
 - [ ] An on-screen message when a world cannot be opened (today it is only written to the console, and the list stays open)
 - [ ] New World: name and seed (blank = random)
 - [ ] Pause menu "Save and Quit to Title"

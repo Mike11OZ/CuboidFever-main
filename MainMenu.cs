@@ -35,6 +35,7 @@ public sealed class MainMenu
 
     public event Action LoadWorldRequested;  // the "Load World" button: Game1 answers with ShowWorldList
     public event Action<string> WorldSelected; // a world was picked from the list (its folder)
+    public event Action<string> DeleteWorldRequested; // the player confirmed deleting a world (its folder)
     public event Action NewWorldRequested;   // create a fresh world
     public event Action SettingsRequested;   // the "Settings" button
     public event Action ExitRequested;
@@ -59,6 +60,7 @@ public sealed class MainMenu
 
         _worldList = new WorldListScreen(graphics, font, playMenuSound);
         _worldList.WorldSelected += folder => WorldSelected?.Invoke(folder);
+        _worldList.DeleteRequested += folder => DeleteWorldRequested?.Invoke(folder);
         _worldList.BackRequested += () =>
         {
             _showingWorldList = false;
@@ -104,9 +106,10 @@ public sealed class MainMenu
 
     // Opens the list of saved worlds, in the order given (most recent first). Game1 calls this when Load World is
     // clicked, because only it knows what is on disk.
-    public void ShowWorldList(IReadOnlyList<WorldListEntry> worlds)
+    // keepScroll is for refreshing the list after a delete, so it does not jump back to the top.
+    public void ShowWorldList(IReadOnlyList<WorldListEntry> worlds, bool keepScroll = false)
     {
-        _worldList.SetWorlds(worlds);
+        _worldList.SetWorlds(worlds, keepScroll);
         _showingWorldList = true;
     }
 

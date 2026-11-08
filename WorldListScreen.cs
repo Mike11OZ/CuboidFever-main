@@ -38,7 +38,14 @@ public sealed class WorldListScreen
     private int _pressed = -1;
     private bool _draggingScrollbar;
 
+    // The Delete button on a row, and the "are you sure?" question that follows a click on it
+    private bool _hoverDelete;
+    private bool _pressedDelete;
+    private int _confirmIndex = -1; // the row being asked about, or -1 when no question is showing
+    private readonly ButtonMenu _confirmMenu;
+
     public event Action<string> WorldSelected;  // the folder of the picked world
+    public event Action<string> DeleteRequested; // the player confirmed deleting this world (its folder)
     public event Action BackRequested;
 
     // Same palette as ButtonMenu, so the list matches the other menus
@@ -52,6 +59,9 @@ public sealed class WorldListScreen
     private static readonly Color TrackColor = new(30, 27, 44);
     private static readonly Color ThumbColor = new(90, 84, 122);
     private static readonly Color ThumbHoverColor = new(150, 144, 190);
+    private static readonly Color DeleteColor = new(96, 38, 48);
+    private static readonly Color DeleteHoverColor = new(150, 52, 64);
+    private static readonly Color DeleteBorderColor = new(140, 70, 82);
 
     private const int DesignBorder = 2;
     private const int DesignMinScrollbarThumb = 24;
@@ -69,12 +79,20 @@ public sealed class WorldListScreen
         // The Back button lives in the footer. ButtonMenu also makes Escape press it.
         _backMenu = new ButtonMenu(graphics, font, playSound) { DesignWidth = 200, DesignHeight = 36 };
         _backMenu.Add("Back", () => BackRequested?.Invoke(), MenuButtonSound.Back);
+
+        // The question's two buttons. Cancel is the "Back" button, so Escape cancels.
+        _confirmMenu = new ButtonMenu(graphics, font, playSound) { Top = 0.5f };
+        _confirmMenu.Add("Delete World", ConfirmDelete);
+        _confirmMenu.Add("Cancel", () => _confirmIndex = -1, MenuButtonSound.Back);
     }
 
-    // Replaces the list (most recent first, as given) and scrolls back to the top.
-    public void SetWorlds(IReadOnlyList<WorldListEntry> worlds)
+    // Replaces the list (most recent first, as given) and scrolls back to the top, or keeps the scroll position
+    // when keepScroll is true (used after a delete, so the list does not jump).
+    public void SetWorlds(IReadOnlyList<WorldListEntry> worlds, bool keepScroll = false)
     {
+        int scroll = _scroll;
         Clear();
+        if (keepScroll) _scroll = scroll;
 
         foreach (var entry in worlds)
             _rows.Add(new Row { Entry = entry });
@@ -91,6 +109,9 @@ public sealed class WorldListScreen
         _hovered = -1;
         _pressed = -1;
         _draggingScrollbar = false;
+        _hoverDelete = false;
+        _pressedDelete = false;
+        _confirmIndex = -1;
     }
 
     private ListMetrics Metrics() =>
@@ -103,6 +124,15 @@ public sealed class WorldListScreen
         int scale = GuiScale.For(_graphics);
         ListMetrics m = Metrics();
         Point mouse = input.MousePosition;
+
+        // While the question is showing, only its two buttons respond
+        if (_confirmIndex >= 0)
+        {
+            _hovered = -1;
+            _hoverDelete = false;
+            _confirmMenu.Update(input);
+            return;
+        }
 
         // Keep the Back button centered in the footer, wherever the window size has put it
         float buttonTop = m.Bottom + (m.FooterHeight - _backMenu.DesignHeight * scale) / 2f;
@@ -126,16 +156,30 @@ public sealed class WorldListScreen
 
         // Rows: a row fires when the mouse is released over the row it was pressed on, like ButtonMenu
         _hovered = _draggingScrollbar ? -1 : WorldListLayout.RowAt(mouse.X, mouse.Y, _scroll, _rows.Count, m);
+        _hoverDelete = _hovered >= 0 && DeleteButtonRect(_hovered, m, scale).Contains(mouse);
 
         if (input.WasLeftClicked && !_draggingScrollbar)
+        {
             _pressed = _hovered;
+            _pressedDelete = _hoverDelete;
+        }
 
         if (input.WasLeftReleased)
         {
             int pressed = _pressed;
+            bool pressedDelete = _pressedDelete;
             _pressed = -1;
+            _pressedDelete = false;
 
-            if (pressed >= 0 && pressed == _hovered)
+            // Released on the same button it was pressed on: the row's Delete button asks first, the rest of the row opens the world
+            if (pressed >= 0 && pressed == _hovered && pressedDelete && _hoverDelete)
+            {
+                _playSound?.Invoke(MenuButtonSound.Click);
+                _confirmIndex = pressed;
+                return;
+            }
+
+            if (pressed >= 0 && pressed == _hovered && !pressedDelete && !_hoverDelete)
             {
                 _playSound?.Invoke(MenuButtonSound.Start);
                 WorldSelected?.Invoke(_rows[pressed].Entry.FolderPath);
@@ -144,6 +188,22 @@ public sealed class WorldListScreen
         }
 
         _backMenu.Update(input);
+    }
+
+    private void ConfirmDelete()
+    {
+        int index = _confirmIndex;
+        _confirmIndex = -1;
+
+        if (index >= 0 && index < _rows.Count)
+            DeleteRequested?.Invoke(_rows[index].Entry.FolderPath);
+    }
+
+    private Rectangle DeleteButtonRect(int index, ListMetrics m, int scale)
+    {
+        Rectangle row = RowRect(index, m);
+        var (x, y, w, h) = WorldListLayout.DeleteButtonRect(row.X, row.Y, row.Width, row.Height, scale);
+        return new Rectangle(x, y, w, h);
     }
 
     private static int MinThumb(int scale) => DesignMinScrollbarThumb * scale;
@@ -199,6 +259,31 @@ public sealed class WorldListScreen
         // Back to the batch the caller expects, with the Back button drawn in it
         sprites.Begin(samplerState: SamplerState.PointClamp);
         _backMenu.Draw(sprites);
+
+        if (_confirmIndex >= 0 && _confirmIndex < _rows.Count)
+            DrawConfirm(sprites, screenWidth, scale);
+    }
+
+    // Dims everything and asks the question, with the two buttons below it
+    private void DrawConfirm(SpriteBatch sprites, int screenWidth, int scale)
+    {
+        int screenHeight = _graphics.Viewport.Height;
+        sprites.Draw(_pixel, new Rectangle(0, 0, screenWidth, screenHeight), Color.Black * 0.75f);
+
+        if (_font != null)
+        {
+            string name = FitText(WorldListLayout.DisplayName(_rows[_confirmIndex].Entry.Name),
+                                  screenWidth - 2 * WorldListLayout.ScreenMargin * scale, scale);
+
+            int middle = (int)(screenHeight * 0.5f);
+            int line = (_font.LineSpacing + 8) * scale;
+
+            DrawCentered(sprites, "Delete this world?", screenWidth, middle - 3 * line, scale, TextColor);
+            DrawCentered(sprites, name, screenWidth, middle - 2 * line, scale, TextColor);
+            DrawCentered(sprites, "It will be gone for good. This cannot be undone.", screenWidth, middle - line, scale, DimTextColor);
+        }
+
+        _confirmMenu.Draw(sprites);
     }
 
     // Opens a batch that only draws inside the viewport. The caller closes it with End.
@@ -268,7 +353,8 @@ public sealed class WorldListScreen
         WorldListEntry entry = _rows[index].Entry;
 
         int textX = picture.Right + 10 * scale;
-        int maxWidth = inner.Right - textX - 8 * scale;
+        Rectangle delete = DeleteButtonRect(index, m, scale);
+        int maxWidth = delete.X - textX - 8 * scale;
 
         string name = FitText(WorldListLayout.DisplayName(entry.Name), maxWidth, scale);
         string played = FitText("Last played: " + FormatLastPlayed(entry.LastPlayedUtc), maxWidth, scale);
@@ -278,6 +364,21 @@ public sealed class WorldListScreen
 
         sprites.DrawString(_font, name, new Vector2(textX, nameY), TextColor, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
         sprites.DrawString(_font, played, new Vector2(textX, playedY), DimTextColor, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
+
+        // Delete button: dark red, brighter when the mouse is on it
+        bool deleteHot = hovered && _hoverDelete;
+        int border = DesignBorder * scale;
+
+        sprites.Draw(_pixel, delete, deleteHot ? BorderHoverColor : DeleteBorderColor);
+        sprites.Draw(_pixel,
+            new Rectangle(delete.X + border, delete.Y + border, delete.Width - border * 2, delete.Height - border * 2),
+            deleteHot ? DeleteHoverColor : DeleteColor);
+
+        Vector2 labelSize = _font.MeasureString("Delete") * scale;
+        var labelPos = new Vector2(
+            (int)(delete.X + (delete.Width - labelSize.X) / 2f),
+            (int)(delete.Y + (delete.Height - labelSize.Y) / 2f));
+        sprites.DrawString(_font, "Delete", labelPos, TextColor, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
     }
 
     // The thumbnail is 16:9 and as tall as the inside of the row
