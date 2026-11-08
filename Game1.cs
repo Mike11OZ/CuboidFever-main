@@ -48,6 +48,11 @@ public class Game1 : Game
     // HUD, so the picture shows the view without the crosshair and hotbar.
     private bool _thumbnailPending;
 
+    // How often level.json (position, time of day, hotbar) is rewritten while playing, so a crash loses at most
+    // this much movement. Edited columns have their own autosave (World.UpdateAutosave).
+    private const float LevelAutosaveSeconds = 15f;
+    private readonly IntervalTimer _levelAutosave = new(LevelAutosaveSeconds);
+
     // Messages shown while playing, such as the missing-blocks warning
     private NoticeBanner _gameNotice = null!;
 
@@ -364,6 +369,17 @@ public class Game1 : Game
         if (_worldSave == null || _world == null) return;
 
         _world.SaveAll();
+        SaveLevelNow();
+
+        if (wait && !_worldSave.Flush())
+            Console.Error.WriteLine("[Save] Some columns could not be written to disk. See the errors above.");
+    }
+
+    // Writes level.json from the game as it is right now: time of day, and where the player is and what they hold.
+    private void SaveLevelNow()
+    {
+        if (_worldSave == null || _world == null) return;
+
         _worldSave.Info.TimeOfDay = _dayNight.TimeOfDay;
 
         // Only once the player has been placed: until then they are at the loading camera, not anywhere real,
@@ -390,9 +406,6 @@ public class Game1 : Game
         {
             Console.Error.WriteLine($"[Save] Could not write level.json: {e.Message}");
         }
-
-        if (wait && !_worldSave.Flush())
-            Console.Error.WriteLine("[Save] Some columns could not be written to disk. See the errors above.");
     }
 
     // The game is closing (window closed, Exit Game, Quit): save the world if one is open.
@@ -527,6 +540,7 @@ public class Game1 : Game
     {
         _worldSave = save;
         CreateWorldSession(save);
+        _levelAutosave.Reset();
 
         string missing = save == null ? null : MissingBlocksMessage.Make(save.MissingBlocks);
         if (missing != null) _gameNotice.Show(missing, 10f); // a long message: give it time to be read
@@ -715,6 +729,11 @@ public class Game1 : Game
         _particleSystem.Update(dt, _world);
 
         _world.Update(GraphicsDevice, _controller.CamPos, totalTime);
+
+        // Position and the rest of level.json, so a crash does not lose recent movement
+        if (_levelAutosave.Advance(dt))
+            SaveLevelNow();
+
         base.Update(gameTime);
     }
 
