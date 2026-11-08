@@ -437,7 +437,11 @@ public class Game1 : Game
         }
         catch (Exception e)
         {
-            Console.Error.WriteLine($"[Save] Could not create a saved world, so this one will not be saved: {e.Message}");
+            // Stay on the New World screen. Starting the world anyway would play a world that is never saved,
+            // which the player would only find out about after losing it.
+            Console.Error.WriteLine($"[Save] Could not create the world: {e.Message}");
+            _mainMenu.ShowNotice($"Could not create the world: {e.Message}");
+            return;
         }
 
         StartGame(save);
@@ -447,7 +451,7 @@ public class Game1 : Game
     private void OnLoadWorldRequested() => ShowSavedWorlds(keepScroll: false);
 
     // The player confirmed deleting a world from the list. The list is shown again either way, so it always
-    // matches what is on disk. (A failure is only written to the console until the on-screen message exists.)
+    // matches what is on disk. A failure is shown as a message on the menu.
     private void OnDeleteWorldRequested(string folderPath)
     {
         try
@@ -457,6 +461,7 @@ public class Game1 : Game
         catch (Exception e)
         {
             Console.Error.WriteLine($"[Save] Could not delete '{folderPath}': {e.Message}");
+            _mainMenu.ShowNotice($"Could not delete the world: {e.Message}");
         }
 
         ShowSavedWorlds(keepScroll: true);
@@ -492,6 +497,7 @@ public class Game1 : Game
         {
             // Stay on the list. Starting some other world instead would look as if the chosen one had been lost.
             Console.Error.WriteLine($"[Save] Could not open the world in '{folderPath}': {e.Message}");
+            _mainMenu.ShowNotice($"Could not open this world: {e.Message}");
             return;
         }
 
@@ -538,7 +544,7 @@ public class Game1 : Game
         Mouse.SetPosition(Window.ClientBounds.Width / 2, Window.ClientBounds.Height / 2);
     }
 
-    // The pause menu's "Exit World": discard the world and go back to the title screen.
+    // The pause menu's "Save and Quit to Title": save and discard the world and go back to the title screen.
     private void ExitWorld()
     {
         DestroyWorldSession();

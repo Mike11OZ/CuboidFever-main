@@ -37,7 +37,8 @@ public sealed class PauseMenu
 
         _buttons = new ButtonMenu(graphics, font, playMenuSound)
         {
-            Top = 0.35f
+            Top = 0.35f,
+            DesignWidth = 340 // wide enough for "Save and Quit to Title"
         };
 
         _buttons.Add(
@@ -49,7 +50,7 @@ public sealed class PauseMenu
         _buttons.Add("Settings", () => SettingsRequested?.Invoke());
 
         _buttons.Add(
-            "Exit World",
+            "Save and Quit to Title",
             () => ExitWorldRequested?.Invoke(),
             MenuButtonSound.Back
         );
