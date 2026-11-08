@@ -26,19 +26,42 @@ public class AudioManager
     private bool _isWaitingForDelay;
     private bool _isPlaying;
 
-    private float _volume = 0.8f;
+    private float _masterVolume = 1.0f;
+    private float _musicVolume = 0.8f;
+    private float _sfxVolume = 1.0f;
     private readonly Random _random = new();
 
     public string CurrentSongName { get; private set; } = "None";
 
-    public float Volume
+    public float MasterVolume
     {
-        get => _volume;
+        get => _masterVolume;
         set
         {
-            _volume = MathHelper.Clamp(value, 0f, 1f);
-            MediaPlayer.Volume = _volume;
+            _masterVolume = MathHelper.Clamp(value, 0f, 1f);
+            UpdateMusicVolume();
         }
+    }
+
+    public float MusicVolume
+    {
+        get => _musicVolume;
+        set
+        {
+            _musicVolume = MathHelper.Clamp(value, 0f, 1f);
+            UpdateMusicVolume();
+        }
+    }
+
+    public float SoundVolume
+    {
+        get => _sfxVolume;
+        set => _sfxVolume = MathHelper.Clamp(value, 0f, 1f);
+    }
+
+    private void UpdateMusicVolume()
+    {
+        MediaPlayer.Volume = _masterVolume * _musicVolume;
     }
 
     /// <summary>
@@ -161,8 +184,8 @@ public class AudioManager
         {
             try
             {
-                float volume = MathHelper.Clamp(_volume * volumeScale, 0f, 1f);
-                sfx.Play(volume, 0f, 0f);
+                float finalVolume = MathHelper.Clamp(_masterVolume * _sfxVolume * volumeScale, 0f, 1f);
+                sfx.Play(finalVolume, 0f, 0f);
             }
             catch (Exception ex)
             {
@@ -231,7 +254,7 @@ public class AudioManager
             _isWaitingForDelay = false;
 
             MediaPlayer.IsRepeating = false;
-            MediaPlayer.Volume = _volume;
+            MediaPlayer.Volume = _masterVolume * _musicVolume;
             MediaPlayer.Play(songToPlay);
         }
         catch (Exception ex)
@@ -261,7 +284,7 @@ public class AudioManager
         {
             CurrentSongName = $"{assetName}.ogg";
             MediaPlayer.IsRepeating = true;
-            MediaPlayer.Volume = _volume;
+            MediaPlayer.Volume = _masterVolume * _musicVolume;
             MediaPlayer.Play(song);
         }
         else

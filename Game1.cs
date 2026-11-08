@@ -196,7 +196,8 @@ public class Game1 : Game
     private void InitAudio()
     {
         _audioManager = new AudioManager();
-        _audioManager.Volume = 0.8f;
+        _audioManager.MasterVolume = 1.0f;
+        _audioManager.MusicVolume = 0.8f;
         _audioManager.InitializePlaylist(); // Preloads songs and sound effects
     }
 
@@ -227,7 +228,6 @@ public class Game1 : Game
             _audioManager.PlayMenuSound
         );
 
-        // Until saving exists, both world buttons do what "Play Now" used to: start a new world.
         _mainMenu.NewWorldRequested += OnNewWorldRequested;
         _mainMenu.CreateWorldRequested += OnCreateWorldRequested;
         _mainMenu.LoadWorldRequested += OnLoadWorldRequested;
@@ -252,6 +252,7 @@ public class Game1 : Game
             _menuFont,
             _fps,
             _windowManager,
+            _audioManager,
             CycleRenderDistance,
             OnMeshSettingChanged,
             _audioManager.PlayMenuSound

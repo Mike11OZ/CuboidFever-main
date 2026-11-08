@@ -10,8 +10,7 @@ namespace CuboidFever;
 // Category page:  Video, Audio, Controls, Back
 // Video page:     Window Mode, Frame Rate Limit, GUI Scale,
 //                 Render Distance, Leaf Culling, Ambient Occlusion, Back
-//
-// Audio and Controls are placeholders for now.
+// Audio page:     Master Volume, Music Volume, Back
 public sealed class SettingsMenu
 {
     private readonly GraphicsDevice _graphics;
@@ -40,6 +39,7 @@ public sealed class SettingsMenu
         SpriteFont font,
         FrameRateLimiter fps,
         WindowManager window,
+        AudioManager audio,
         Action cycleRenderDistance,
         Action meshSettingChanged,
         Action<MenuButtonSound> playMenuSound)
@@ -109,11 +109,29 @@ public sealed class SettingsMenu
 
         _videoPage.Add("Back", () => _current = _categoryPage, MenuButtonSound.Back);
 
-        // ---------- Placeholder pages ----------
-        _audioPage = CreatePlaceholderPage(graphics, font, playMenuSound, "Audio settings coming soon");
+        // ---------- Audio page ----------
+        _audioPage = new ButtonMenu(graphics, font, playMenuSound)
+        {
+            DesignHeight = DesignButtonHeight,
+            DesignGap = DesignButtonGap
+        };
+
+        _audioPage.Add(
+            () => $"Master Volume: {MathF.Round(audio.MasterVolume * 100)}%",
+            () => audio.MasterVolume = CycleVolume(audio.MasterVolume)
+        );
+
+        _audioPage.Add(
+            () => $"Music Volume: {MathF.Round(audio.MusicVolume * 100)}%",
+            () => audio.MusicVolume = CycleVolume(audio.MusicVolume)
+        );
+
+        _audioPage.Add("Back", () => _current = _categoryPage, MenuButtonSound.Back);
+
+        // ---------- Controls page ----------
         _controlsPage = CreatePlaceholderPage(graphics, font, playMenuSound, "Controls settings coming soon");
 
-        // Only the Video page needs extra width for its long labels
+        // Set design widths for long labels
         if (font != null)
         {
             string[] longestVideo =
@@ -127,6 +145,14 @@ public sealed class SettingsMenu
             };
 
             _videoPage.DesignWidth = (int)longestVideo.Max(s => font.MeasureString(s).X) + 60;
+
+            string[] longestAudio =
+            {
+                "Master Volume: 100%",
+                "Music Volume: 100%"
+            };
+
+            _audioPage.DesignWidth = (int)longestAudio.Max(s => font.MeasureString(s).X) + 60;
         }
 
         _current = _categoryPage;
@@ -152,6 +178,12 @@ public sealed class SettingsMenu
     private static string LeafCullLabel(int depth) =>
         depth <= 0 ? "Off" : $"Depth {depth}";
 
+    private static float CycleVolume(float currentVolume)
+    {
+        float next = MathF.Round(currentVolume + 0.1f, 1);
+        return next > 1.0f ? 0.0f : next;
+    }
+
     private void UpdateLayout()
     {
         int scale = GuiScale.For(_graphics);
@@ -170,7 +202,7 @@ public sealed class SettingsMenu
     public void Update(ActionInput input)
     {
         UpdateLayout();
-        _current.Update(input);   // ButtonMenu now handles Escape → Back automatically
+        _current.Update(input);
     }
 
     public void ShowCategoryPage() => _current = _categoryPage;
