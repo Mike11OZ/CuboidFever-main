@@ -507,6 +507,17 @@ public class Game1 : Game
             return;
         }
 
+        // A world with blocks this version lacks must not open by surprise: they would show as air, and saving
+        // over them loses them for good. Ask first; the world stays opened (and locked) until the answer.
+        string question = MissingBlocksMessage.MakeQuestion(save.MissingBlocks);
+        if (question != null)
+        {
+            _mainMenu.AskConfirm("Missing blocks", question, "Open Anyway", "Cancel",
+                onConfirm: () => StartGame(save),
+                onCancel: () => save.Dispose());
+            return;
+        }
+
         StartGame(save);
     }
 

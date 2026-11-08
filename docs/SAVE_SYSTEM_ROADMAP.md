@@ -94,7 +94,7 @@ Saving follows the Minecraft Java model: the save is kept continuously up to dat
 - [x] `level.json.bak`: each save keeps the previous readable level.json as a backup; a missing or damaged level.json is restored from it on open. A file from a newer game is never "repaired" from an older backup
 - [x] Lock so two game instances cannot open the same world (`WorldLock`: an exclusive file handle on `session.lock`, released by the operating system even after a crash). Deleting a world that is open elsewhere is refused before anything is removed
 - [ ] Format-version migration path
-- [x] On-screen warning (10 seconds, also over the loading splash) when a world was saved with blocks this build does not have; they load as air and the first few are named
+- [x] On-screen warning (10 seconds, also over the loading splash) when a world was saved with blocks this build does not have; they load as air and the first few are named. Opening such a world first asks "Open Anyway / Cancel" (`ConfirmDialog`), because saving over those spots would lose the blocks for good
 - [ ] Add a test project (xUnit) covering palette, column round-trip and level.json
 
 ## Phase 7: Later

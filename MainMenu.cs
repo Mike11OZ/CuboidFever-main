@@ -23,6 +23,9 @@ public sealed class MainMenu
     // A message that fades away by itself ("Could not open 'World 3': ..."), shown over whatever screen is open
     private readonly NoticeBanner _notice;
 
+    // A question over the whole menu ("Open this world anyway?"). While it is open nothing else responds.
+    private readonly ConfirmDialog _confirm;
+
     // One button stack per page. _current is the page being shown and updated.
     private readonly ButtonMenu _mainPage;
     private readonly ButtonMenu _playPage;
@@ -57,6 +60,7 @@ public sealed class MainMenu
     {
         _font = font;
         _notice = new NoticeBanner(graphics, smallFont ?? font);
+        _confirm = new ConfirmDialog(graphics, font, smallFont, playMenuSound);
 
         _panorama = new PanoramaBackground(
             graphics,
@@ -141,6 +145,11 @@ public sealed class MainMenu
     // (opening, creating or deleting a world) did not work.
     public void ShowNotice(string message) => _notice.Show(message);
 
+    // Asks the player a question over the menu. Game1 uses this when something should not happen without an
+    // explicit yes; exactly one of the two actions runs, once the player answers.
+    public void AskConfirm(string heading, string message, string confirmLabel, string cancelLabel, Action onConfirm, Action onCancel) =>
+        _confirm.Show(heading, message, confirmLabel, cancelLabel, onConfirm, onCancel);
+
     // A typed character from the window. Only the New World screen has text boxes.
     public void OnTextInput(char c)
     {
@@ -151,6 +160,13 @@ public sealed class MainMenu
     {
         _panorama.Update(deltaTime);
         _notice.Update(deltaTime);
+
+        // A question open: only its buttons respond
+        if (_confirm.IsOpen)
+        {
+            _confirm.Update(input);
+            return;
+        }
 
         if (_showingNewWorld) _newWorld.Update(input, deltaTime);
         else if (_showingWorldList) _worldList.Update(input);
@@ -224,6 +240,7 @@ public sealed class MainMenu
         else _current.Draw(sprites);
 
         _notice.Draw(sprites);
+        _confirm.Draw(sprites);
 
         sprites.End();
     }
