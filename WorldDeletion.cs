@@ -36,14 +36,21 @@ public static class WorldDeletion
     }
 
     // Deletes the world folder and everything in it. Throws InvalidOperationException if the folder is not a
-    // world (nothing is touched), or IOException / UnauthorizedAccessException if the files cannot be removed
+    // world, or WorldInUseException if another copy of the game has it open (in both cases nothing is touched),
+    // or IOException / UnauthorizedAccessException if the files cannot be removed
     // (for example, another program has one open); the caller shows that to the player.
     public static void Delete(string savesRoot, string folder)
     {
         if (!IsWorldFolder(savesRoot, folder))
             throw new InvalidOperationException($"'{folder}' is not a saved world, so it was not deleted.");
 
-        Directory.Delete(Path.GetFullPath(folder), recursive: true);
+        string full = Path.GetFullPath(folder);
+
+        // A world open in another window must not lose files out from under it. Taking its lock proves nobody
+        // has it open; it is let go again straight away because a folder cannot be deleted while a file in it is held.
+        WorldLock.Acquire(full).Dispose();
+
+        Directory.Delete(full, recursive: true);
     }
 
     private static string TrimSeparators(string path) =>

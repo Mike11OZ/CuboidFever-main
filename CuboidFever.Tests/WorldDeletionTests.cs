@@ -36,6 +36,23 @@ public sealed class WorldDeletionTests : IDisposable
     }
 
     [Fact]
+    public void WorldOpenInAnotherWindow_IsNotDeleted_AndNothingInItIsTouched()
+    {
+        string world = MakeWorld("Busy");
+
+        using (WorldLock.Acquire(world)) // stands in for another copy of the game
+        {
+            Assert.Throws<WorldInUseException>(() => WorldDeletion.Delete(_root, world));
+            Assert.True(File.Exists(Path.Combine(world, "columns", "c.0.0.cfc")));
+            Assert.True(File.Exists(WorldInfo.PathIn(world)));
+        }
+
+        // Once it is closed, deleting works
+        WorldDeletion.Delete(_root, world);
+        Assert.False(Directory.Exists(world));
+    }
+
+    [Fact]
     public void OtherWorlds_AreLeftAlone()
     {
         string a = MakeWorld("A");

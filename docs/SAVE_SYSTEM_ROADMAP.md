@@ -92,7 +92,7 @@ Saving follows the Minecraft Java model: the save is kept continuously up to dat
 
 - [x] Quarantine unreadable column files instead of crashing (done in Phase 3)
 - [ ] Keep a `level.json.bak` in case `level.json` itself is damaged
-- [ ] Lock file so two game instances cannot open the same world
+- [x] Lock so two game instances cannot open the same world (`WorldLock`: an exclusive file handle on `session.lock`, released by the operating system even after a crash). Deleting a world that is open elsewhere is refused before anything is removed
 - [ ] Format-version migration path
 - [ ] Clear in-game message when a save mentions blocks this build does not have
 - [ ] Add a test project (xUnit) covering palette, column round-trip and level.json

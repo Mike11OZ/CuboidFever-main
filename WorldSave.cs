@@ -21,12 +21,14 @@ public sealed class WorldSave : IDisposable
 
     private readonly FileColumnStore _store;
     private readonly ColumnWriteQueue _writer;
+    private readonly WorldLock _lock; // held for as long as the world is open, so no other copy of the game can open it
 
-    private WorldSave(string folderPath, WorldInfo info, BlockPalette palette)
+    private WorldSave(string folderPath, WorldInfo info, BlockPalette palette, WorldLock worldLock)
     {
         FolderPath = folderPath;
         Info = info;
         Palette = palette;
+        _lock = worldLock;
 
         _store = new FileColumnStore(folderPath);
         _writer = new ColumnWriteQueue(_store);
@@ -44,39 +46,61 @@ public sealed class WorldSave : IDisposable
         string folderPath = Path.Combine(root, folder);
         Directory.CreateDirectory(folderPath);
 
-        var palette = BlockPalette.ForNewWorld(BlockRegistry.Instance);
-        var info = new WorldInfo
-        {
-            Name = name,
-            Seed = seed,
-            BlockNames = new List<string>(palette.Names)
-        };
-        info.Save(folderPath);
+        var worldLock = WorldLock.Acquire(folderPath);
 
-        return new WorldSave(folderPath, info, palette);
+        try
+        {
+            var palette = BlockPalette.ForNewWorld(BlockRegistry.Instance);
+            var info = new WorldInfo
+            {
+                Name = name,
+                Seed = seed,
+                BlockNames = new List<string>(palette.Names)
+            };
+            info.Save(folderPath);
+
+            return new WorldSave(folderPath, info, palette, worldLock);
+        }
+        catch
+        {
+            worldLock.Dispose(); // do not keep a world locked that failed to open
+            throw;
+        }
     }
 
-    // Opens an existing world. Throws if level.json is missing, damaged, or from a newer version of the game.
+    // Opens an existing world. Throws if level.json is missing, damaged, or from a newer version of the game, or
+    // WorldInUseException if another copy of the game has the world open.
     public static WorldSave Open(string folderPath)
     {
-        var info = WorldInfo.Load(folderPath);
-        var palette = BlockPalette.FromSaved(BlockRegistry.Instance, info.BlockNames);
+        // Locked first, so a world that is open elsewhere is never read or rewritten from here
+        var worldLock = WorldLock.Acquire(folderPath);
 
-        if (palette.MissingBlocks.Count > 0)
+        try
         {
-            Console.Error.WriteLine(
-                $"[Save] '{info.Name}' uses blocks this version of the game does not have; they will load as air: " +
-                string.Join(", ", palette.MissingBlocks));
-        }
+            var info = WorldInfo.Load(folderPath);
+            var palette = BlockPalette.FromSaved(BlockRegistry.Instance, info.BlockNames);
 
-        // This version has blocks the world had not seen yet: remember them so their saved IDs never change
-        if (palette.NeedsSave)
+            if (palette.MissingBlocks.Count > 0)
+            {
+                Console.Error.WriteLine(
+                    $"[Save] '{info.Name}' uses blocks this version of the game does not have; they will load as air: " +
+                    string.Join(", ", palette.MissingBlocks));
+            }
+
+            // This version has blocks the world had not seen yet: remember them so their saved IDs never change
+            if (palette.NeedsSave)
+            {
+                info.BlockNames = new List<string>(palette.Names);
+                info.Save(folderPath);
+            }
+
+            return new WorldSave(folderPath, info, palette, worldLock);
+        }
+        catch
         {
-            info.BlockNames = new List<string>(palette.Names);
-            info.Save(folderPath);
+            worldLock.Dispose(); // do not keep a world locked that failed to open
+            throw;
         }
-
-        return new WorldSave(folderPath, info, palette);
     }
 
     // Every readable world in the saves folder, most recently played first. Folders without a readable
@@ -197,6 +221,10 @@ public sealed class WorldSave : IDisposable
     // Waits until every queued column is on disk. False means at least one could not be written (see the log).
     public bool Flush() => _writer.Flush();
 
-    // Writes everything still queued and stops the background writer.
-    public void Dispose() => _writer.Dispose();
+    // Writes everything still queued, stops the background writer, and lets other copies of the game open the world.
+    public void Dispose()
+    {
+        _writer.Dispose();
+        _lock.Dispose();
+    }
 }
