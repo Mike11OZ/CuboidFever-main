@@ -92,6 +92,13 @@ public class Game1 : Game
 
         // Closing the window, Exit Game and the main menu's Quit all end up here
         Exiting += (_, _) => CloseWorldSave();
+
+        // Typed characters (in the New World screen's text boxes). The window turns key presses into characters
+        // for the player's keyboard layout; nothing else in the game needs them.
+        Window.TextInput += (_, e) =>
+        {
+            if (_state == GameState.MainMenu) _mainMenu.OnTextInput(e.Character);
+        };
     }
 
     protected override void LoadContent()
@@ -222,6 +229,7 @@ public class Game1 : Game
 
         // Until saving exists, both world buttons do what "Play Now" used to: start a new world.
         _mainMenu.NewWorldRequested += OnNewWorldRequested;
+        _mainMenu.CreateWorldRequested += OnCreateWorldRequested;
         _mainMenu.LoadWorldRequested += OnLoadWorldRequested;
         _mainMenu.WorldSelected += OnWorldSelected;
         _mainMenu.DeleteWorldRequested += OnDeleteWorldRequested;
@@ -410,15 +418,22 @@ public class Game1 : Game
         IsMouseVisible = true;
     }
 
-    // The solo menu's world buttons. New World makes a fresh saved world right away (a screen for choosing its name
-    // and seed is still to come, docs/SAVE_SYSTEM_ROADMAP.md Phase 5). Load World shows the list of saved worlds.
-    private void OnNewWorldRequested()
+    // The solo menu's world buttons. New World opens the screen where the name and seed are chosen, and Create World
+    // on that screen makes the saved world. Load World shows the list of saved worlds.
+    private void OnNewWorldRequested() => _mainMenu.ShowNewWorld(WorldSave.NextDefaultName());
+
+    // Create World was pressed with this name and seed text. A blank name becomes "World N", a blank seed a random
+    // one, and a text seed always gives the same world (NewWorldRules).
+    private void OnCreateWorldRequested(string nameText, string seedText)
     {
         WorldSave save = null;
 
         try
         {
-            save = WorldSave.CreateNew(WorldSave.NextDefaultName(), WorldSeed);
+            string name = NewWorldRules.CleanName(nameText, WorldSave.NextDefaultName());
+            int seed = NewWorldRules.ParseSeed(seedText, () => Random.Shared.Next());
+
+            save = WorldSave.CreateNew(name, seed);
         }
         catch (Exception e)
         {

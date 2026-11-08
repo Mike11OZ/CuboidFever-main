@@ -10,6 +10,7 @@ namespace CuboidFever;
 //     Main:  Play Game, Settings, Exit Game
 //     Play:  Play Solo, Play Multiplayer, Back
 //     Solo:  Load World, New World, Back
+//     New World (from New World): name and seed boxes, Create World, Cancel (NewWorldScreen)
 //     Worlds (from Load World): a scrolling list of saved worlds with thumbnails (WorldListScreen), Back
 //
 // Moving between pages is only navigation, so MainMenu handles it itself. Everything that actually does
@@ -30,13 +31,18 @@ public sealed class MainMenu
     private readonly WorldListScreen _worldList;
     private bool _showingWorldList;
 
+    // Same for the New World screen, with its text boxes
+    private readonly NewWorldScreen _newWorld;
+    private bool _showingNewWorld;
+
     private const float TitleScale = 2f;
     private const float TitleTopFraction = 0.18f;
 
     public event Action LoadWorldRequested;  // the "Load World" button: Game1 answers with ShowWorldList
     public event Action<string> WorldSelected; // a world was picked from the list (its folder)
     public event Action<string> DeleteWorldRequested; // the player confirmed deleting a world (its folder)
-    public event Action NewWorldRequested;   // create a fresh world
+    public event Action NewWorldRequested;   // the "New World" button: Game1 answers with ShowNewWorld
+    public event Action<string, string> CreateWorldRequested; // Create World was pressed (name and seed, as typed)
     public event Action SettingsRequested;   // the "Settings" button
     public event Action ExitRequested;
 
@@ -69,6 +75,14 @@ public sealed class MainMenu
             _current = _soloPage;
         };
 
+        _newWorld = new NewWorldScreen(graphics, font, smallFont, playMenuSound);
+        _newWorld.CreateRequested += (name, seed) => CreateWorldRequested?.Invoke(name, seed);
+        _newWorld.BackRequested += () =>
+        {
+            _showingNewWorld = false;
+            _current = _soloPage;
+        };
+
         // ---- Main page ----
         _mainPage.Add("Play Game", () => _current = _playPage);
         _mainPage.Add("Settings", () => SettingsRequested?.Invoke());
@@ -83,14 +97,10 @@ public sealed class MainMenu
         _playPage.Add("Back", () => _current = _mainPage, MenuButtonSound.Back);
 
         // ---- Solo page ----
-        // Load World only opens the list of saved worlds, so it is an ordinary click. Picking a world from the
-        // list, and New World, start a world and use the "Start" sound.
+        // Load World and New World only open another screen, so they are ordinary clicks. Picking a world from
+        // the list, and Create World, start a world and use the "Start" sound.
         _soloPage.Add("Load World", () => LoadWorldRequested?.Invoke());
-        _soloPage.Add(
-            "New World",
-            () => NewWorldRequested?.Invoke(),
-            MenuButtonSound.Start
-        );
+        _soloPage.Add("New World", () => NewWorldRequested?.Invoke());
         _soloPage.Add("Back", () => _current = _playPage, MenuButtonSound.Back);
 
         _current = _mainPage;
@@ -101,6 +111,7 @@ public sealed class MainMenu
     public void ShowMainPage()
     {
         _showingWorldList = false;
+        _showingNewWorld = false;
         _worldList.Clear(); // frees the thumbnails
         _current = _mainPage;
     }
@@ -114,11 +125,26 @@ public sealed class MainMenu
         _showingWorldList = true;
     }
 
+    // Opens the New World screen. Game1 calls this when New World is clicked, with the name a world gets if the
+    // player types none ("World 3"), because only it knows what is on disk.
+    public void ShowNewWorld(string defaultName)
+    {
+        _newWorld.Show(defaultName);
+        _showingNewWorld = true;
+    }
+
+    // A typed character from the window. Only the New World screen has text boxes.
+    public void OnTextInput(char c)
+    {
+        if (_showingNewWorld) _newWorld.OnTextInput(c);
+    }
+
     public void Update(ActionInput input, float deltaTime)
     {
         _panorama.Update(deltaTime);
 
-        if (_showingWorldList) _worldList.Update(input);
+        if (_showingNewWorld) _newWorld.Update(input, deltaTime);
+        else if (_showingWorldList) _worldList.Update(input);
         else _current.Update(input);
     }
 
@@ -142,7 +168,7 @@ public sealed class MainMenu
 
             Vector2 titleSize = _font.MeasureString(GameInfo.Title);
 
-            if (!_showingWorldList)
+            if (!_showingWorldList && !_showingNewWorld)
             {
                 var titlePos = new Vector2(
                     MathF.Round((screenWidth - titleSize.X * titleScale) / 2f),
@@ -163,7 +189,7 @@ public sealed class MainMenu
             }
 
             // Left out on the world list, where the Back button would sit on top of it
-            if (!_showingWorldList)
+            if (!_showingWorldList && !_showingNewWorld)
             {
                 var versionPos = new Vector2(
                     12 * scale,
@@ -184,7 +210,8 @@ public sealed class MainMenu
             }
         }
 
-        if (_showingWorldList) _worldList.Draw(sprites);
+        if (_showingNewWorld) _newWorld.Draw(sprites);
+        else if (_showingWorldList) _worldList.Draw(sprites);
         else _current.Draw(sprites);
 
         sprites.End();

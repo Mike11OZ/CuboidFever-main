@@ -82,7 +82,7 @@ Saving follows the Minecraft Java model: the save is kept continuously up to dat
 - [x] World list screen: Load World shows a scrolling list (mouse wheel and draggable scrollbar), most recently played first, one row per world with its thumbnail, name and last-played time (`WorldListScreen`)
 - [x] Delete a world from the list: a Delete button on each row, then a "This cannot be undone" confirmation (`WorldDeletion` refuses anything that is not a world folder directly inside the saves folder)
 - [ ] An on-screen message when a world cannot be opened (today it is only written to the console, and the list stays open)
-- [ ] New World: name and seed (blank = random)
+- [x] New World screen: name box (blank = "World N") and seed box (blank = random, a number is used as is, any other text is turned into a repeatable number), Create World / Cancel; Tab switches boxes, Enter creates, Escape cancels
 - [ ] Pause menu "Save and Quit to Title"
 - [ ] Brief autosave indicator in the HUD
 - [x] World thumbnail: `thumbnail.png` in the world folder, taken from the paused frame (before the HUD is drawn) and shown in the list. Closing the window mid-play only takes one if the world has none yet
