@@ -1,0 +1,193 @@
+From 95531d5a386ff527fc04e715651211be2b3ed0d9 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sun, 8 Nov 2026 10:36:45 -0500
+Subject: [PATCH] Client/server roadmap; fix xUnit2009 warning in
+ MissingBlocksMessageTests
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01L3RoKYj74dueBKg8Ek6iN8
+---
+ docs/CLIENT_SERVER_ROADMAP.md | 171 ++++++++++++++++++++++++++++++++++
+ 1 file changed, 171 insertions(+)
+ create mode 100644 docs/CLIENT_SERVER_ROADMAP.md
+
+diff --git a/docs/CLIENT_SERVER_ROADMAP.md b/docs/CLIENT_SERVER_ROADMAP.md
+new file mode 100644
+index 0000000..0c20ee4
+--- /dev/null
++++ b/docs/CLIENT_SERVER_ROADMAP.md
+@@ -0,0 +1,171 @@
++# CuboidFever client/server split: roadmap
++
++Status key: `[x]` done, `[ ]` not started. Sizes are relative effort: **S** an evening, **M** a few sessions,
++**L** a stretch of work. Work happens on `Test-Branch`, one playable step at a time, like the save system.
++
++The goal: singleplayer and multiplayer run the *same* game code. The world's rules live in a **server**; the screen,
++sound and input live in a **client**; they talk through messages. Singleplayer is an **integrated server** running
++inside the game process, connected to the client by an in-memory channel. Multiplayer is the same client talking to
++the same server code over the network. A **dedicated server** is that server code in a console program.
++
++## What the codebase told us
++
++These findings come from reading the current code, and they shape the whole plan.
++
++1. **`World` is two things in one class.** It owns the authoritative data and rules (columns, terrain generation,
++   `SetBlock`, light, fluid/sand ticks, saving, autosave) *and* the rendering (chunk meshing jobs, frustum visibility,
++   `DrawSolid`/`DrawWater`, render distance, GPU buffers via `Update(GraphicsDevice, ...)`). Splitting it is the
++   centre of the project.
++2. **But the surface the rest of the game uses is small.** Outside `World`, the code calls only `GetBlock`, `IsSolid`,
++   `SetBlock`, `Raycast`, `IsColumnLoaded`, `GetInfoOrWall`, `Light` (particles), and a few debug getters.
++   `Player` needs only `IsSolid`; `BlockInteraction` only `Raycast`/`GetBlock`/`SetBlock`; `FluidSimulator`,
++   `GravityBlocks`, `BlockTickScheduler` and `LightMap` only block reads plus `SetBlock`. A narrow read interface
++   will cover nearly all of it.
++3. **`Chunk` carries GPU state.** Its vertex/index buffers, `Version`/`AppliedVersion` and `Bounds` are rendering
++   concerns living in a data class. They move to the client side.
++4. **`BlockRegistry` cannot run without a graphics device.** It builds texture regions from `TextureAtlas.Instance`
++   in its constructor. A server has no atlas. Block *data* (id, name, solid/water flags, tick kind, light emission,
++   palette) has to be separated from block *appearance* (texture regions). This is the biggest hidden prerequisite.
++5. **One project, a WinExe.** Everything is in `CuboidFever.csproj` with `MonoGame.Framework.DesktopGL`. A dedicated
++   server needs a shared library (`Core`) that both a client and a server project reference.
++6. **Static singletons.** `BlockRegistry.Instance`, `TextureAtlas.Instance`, `World.RenderDistanceSetting`,
++   `GuiScale.Setting`, `ChunkMesher.LeafCullDepth`. Read-only ones (the block registry) are fine to share between
++   client and integrated server; per-player ones (render distance, GUI scale) must be client-only.
++7. **The save system already has the right seam.** `World` only calls `WorldSave.TryLoadColumn` and `SaveColumn`, so
++   `WorldSave` moves to the server side unchanged. Three more pieces transfer directly:
++   `ColumnSerializer` (a compact, checksummed, palette-based column format) is also a good *network* column format;
++   `BlockPalette` (name-based block ids) is exactly the id table a client needs in its handshake, because runtime
++   ids differ between game versions; `WorldLock` already stops two processes opening one world.
++8. **Time of day and spawning are world state.** `DayNightCycle` is owned by `Game1` today, and `Game1` writes
++   `World.SkyDarkness` from it. The server must own the clock; the client derives sky colour and darkness from it.
++9. **Threading is already half-right.** The main thread mutates the world; worker threads only produce finished
++   columns and meshes into concurrent queues. The server keeps that pattern on its own thread, and the client keeps
++   a separate mesh pool.
++10. **Player movement runs against `IsSolid`** on the client. That gives client-side prediction for free once the
++    client holds the columns it was sent.
++
++## Decisions to make first (Phase 0)
++
++Recommendations are in bold; each is a reasoned default, not a requirement.
++
++| # | Question | Recommendation |
++|---|----------|----------------|
++| D1 | How does singleplayer work? | **Integrated server** on its own thread with an in-memory channel, using the same messages as the network. One code path, no "if singleplayer" branches. |
++| D2 | Who computes light? | **The client**, from the blocks it receives (`Column.ComputeSkyLight`/`ComputeBlockLight` and `LightMap` already do this on load). Only block data and block changes cross the wire. The server still runs light if it needs it for gameplay later. |
++| D3 | Who generates terrain? | **The server only.** It sends whole columns (`ColumnSerializer` bytes). Sending only seed + edits would save bandwidth but ties client and server to bit-identical floating-point noise and generator versions. Optimise later if bandwidth matters. |
++| D4 | Biome tint for meshing (`ChunkMesher` takes a `ClimateMap`) | **The client builds a `ClimateMap` from the world seed** sent in the handshake (cheap noise, no terrain generation). |
++| D5 | Movement authority | **Client-authoritative with server sanity checks first** (like early Minecraft), server-authoritative later if cheating matters. |
++| D6 | Transport | **A reliable-UDP library such as LiteNetLib, or plain TCP to start.** Decide in Phase 4; Phases 1-3 need no network. |
++| D7 | Shared math types | **Keep MonoGame's `Vector3`/`BoundingBox` in `Core`.** A headless server can reference MonoGame.Framework for math without opening a window. Avoids rewriting `Player` and `World`. |
++| D8 | Target scale | Assume **friends/LAN, up to about 16 players**, until told otherwise. It decides how much security work Phase 7 needs. |
++
++## Phase 1: Untangle inside one process (no behaviour change)
++
++Every step ships and is playable. This is the bulk of the work.
++
++- [ ] **1.1 Read interface (S).** Add `IBlockAccess` (`GetBlock`, `IsSolid`, `GetInfoOrWall`, `IsColumnLoaded`,
++      `GetColumn`) implemented by `World`. `LightMap`, `FluidSimulator`, `GravityBlocks`, `BlockTickScheduler`,
++      `Player`, `ParticleSystem` and `SpawnSequence` take it instead of `World`. Mechanical, and it makes the
++      simulation unit-testable with fake worlds for the first time.
++- [ ] **1.2 Split the block registry (M).** `BlockData` (ids, flags, tick kind, emission, palette; no textures)
++      versus `BlockAppearance` (texture regions, built from the atlas). The registry's data half loads with no
++      graphics device. This also lets the test project exercise the real registry (an open item since the save
++      system's Phase 1).
++- [ ] **1.3 Move GPU state out of `Chunk` (M).** A client-side `ChunkMesh` keyed by chunk holds the buffers,
++      `Version`/`AppliedVersion` and bounds. `Chunk` and `Column` keep only block data and light.
++      `Column.Active` (all 8 neighbours loaded, ready to mesh) becomes client meshing state.
++- [ ] **1.4 Split `World` (L).** `ServerWorld`: columns, generation, light if kept server-side, ticks, `SetBlock`,
++      save, autosave. `ClientWorld`: received columns, mesh jobs, visibility, draw, render distance, local light.
++      At this step both still live in one process and talk through a thin `IWorldConnection` interface with direct
++      calls, so behaviour is unchanged and the seam is in the right place.
++- [ ] **1.5 A real server tick (M).** `ServerWorld.Tick(dt)` at a fixed rate (20/s) with no `GraphicsDevice`.
++      Generation and unload follow each player's position (the "interest area") instead of the camera.
++      `BlockTickScheduler` already works in seconds, which fits.
++- [ ] **1.6 Ownership of player and time (S).** A `ServerPlayer` record (position, look, flying, hotbar: exactly what
++      `PlayerSave` holds today) and the day/night clock move to the server. The client keeps a prediction copy.
++- [ ] **1.7 Settings split (S).** Render distance becomes a client request ("I want N columns") that the server
++      caps; `World.RenderDistanceSetting` and other statics stop being shared.
++
++## Phase 2: Protocol
++
++- [ ] **2.1 Message types (M).** Plain data, no behaviour: `Handshake` (game version, seed, block-name table from
++      `BlockPalette`), `ColumnData` (`ColumnSerializer` bytes), `ColumnUnload`, `BlockChange`, `PlaceBlockRequest`,
++      `BreakBlockRequest`, `PlayerState`, `TimeOfDay`, `Disconnect(reason)`.
++- [ ] **2.2 Binary reader/writer and versioning (S).** A protocol version number checked in the handshake, so
++      mismatched builds are refused with a clear message, as the save system does for newer level files.
++- [ ] **2.3 Tests (S).** Round trips for every message, truncated and damaged input rejected cleanly, in the
++      existing xUnit project. No graphics needed.
++- [ ] **2.4 Block-id translation (S).** The client maps the server's block names to its own runtime ids once, at
++      handshake. A name the client does not have is shown as air, with the same warning pattern as the save system.
++
++## Phase 3: Integrated server (loopback)
++
++- [ ] **3.1 In-memory transport (S).** Two thread-safe queues implementing a small `IConnection`.
++- [ ] **3.2 Server thread (M).** The server tick loop on its own thread, owning `ServerWorld` and `WorldSave`.
++      Nothing else touches them. Singleplayer pause stops the server tick; multiplayer will not.
++- [ ] **3.3 Game1 as a client (L).** Starting a world means: open the save, start the integrated server, connect.
++      Block edits become requests; columns, block changes and time arrive as messages. Save and Quit means
++      disconnect, then server shutdown with the existing flush. The world list, New World, delete, thumbnails,
++      backup and lock all keep working because they operate on local saves before a server starts.
++- [ ] **3.4 Optimistic block edits (M).** The client applies a placement or break immediately and lets the server's
++      `BlockChange` confirm or correct it, so singleplayer feels exactly as it does now.
++- [ ] **3.5 Parity check (M).** Play-test everything the save system covers (position, hotbar, time, water flow,
++      sand falling, lamps after reload) through the loopback path before any real networking.
++
++## Phase 4: Network transport and connecting
++
++- [ ] **4.1 Transport (M).** Implement `IConnection` over the chosen library (D6).
++- [ ] **4.2 Host and join (M).** Server listens on a port; the Multiplayer button gets a connect screen (direct
++      address and port) in the same style as the New World screen. "Connecting...", version refusal, timeout and
++      disconnect messages use the existing `NoticeBanner` and `ConfirmDialog`.
++- [ ] **4.3 Column streaming (M).** Send columns nearest-first within the client's view distance, a few per tick,
++      and unload messages as the player moves, so a join does not stall the connection.
++- [ ] **4.4 Open to LAN (S).** The integrated server can also listen, so a friend can join your running singleplayer
++      world.
++
++## Phase 5: Multiplayer gameplay
++
++- [ ] **5.1 Other players (M).** Player entities (simple boxes at first), position/look updates with interpolation.
++- [ ] **5.2 Server-side validation (M).** Reach distance, loaded-column checks, not placing a block inside a player,
++      rejection that the client rolls back.
++- [ ] **5.3 Per-player save data (M).** `level.json`'s single `Player` becomes a `players/<id>.json` file per player;
++      the world keeps its settings. Needs a small format-version bump and a migration: the save system's one open
++      Phase 6 item (the format-version migration path) gets built here.
++- [ ] **5.4 Spawning and respawn (S).** The server decides where a joining player appears (today's `SpawnSequence`
++      logic moves server-side).
++- [ ] **5.5 Chat and player list (S, optional).**
++
++## Phase 6: Dedicated server
++
++- [ ] **6.1 Project split (L).** `CuboidFever.Core` (blocks, world, generation, save, protocol; no window or
++      textures), `CuboidFever` (the client), `CuboidFever.Server` (console). The test project references `Core`.
++- [ ] **6.2 Server host (M).** Config file (port, world folder, max players, view distance), logging, graceful
++      shutdown that flushes the world, periodic autosave (already built).
++- [ ] **6.3 Operations (S).** Console commands (list, kick, stop, save), `WorldLock` guarding the world folder.
++
++## Phase 7: Later
++
++- Authentication, rate limiting and encryption if the game is ever exposed beyond friends.
++- Unreliable/sequenced channels for movement, delta compression of block changes, deflate on the wire if columns
++  prove large.
++- Entities beyond players (mobs, items), chest/sign block data (also listed in the save system's Phase 7).
++- Server-authoritative movement if cheating matters.
++
++## Known risks
++
++- **Phase 1 is a large refactor of working code.** Keep every step playable, run the full test project each time,
++  and do not combine steps. Step 1.1 is deliberately first: small, safe, and it adds tests for the simulation.
++- **Behaviour drift in singleplayer.** Pause, spawn, time of day and sand/water timing must feel identical after
++  Phase 3. The parity check (3.5) exists for this.
++- **Threading.** Once the server has its own thread, any code that reached into the world from the main thread must
++  become a message. The rule: *only the server thread touches `ServerWorld`; only the main thread touches
++  `ClientWorld`; messages are copies*.
++- **Light divergence (D2).** Client-computed light can differ cosmetically from a server's if the rules ever
++  change. Harmless today; revisit if mobs spawn by light level.
++- **Version skew.** Client and server must agree on the protocol and on block names. The handshake enforces both.
++- **Security.** Until Phase 7, assume a trusted LAN.
++
++## Suggested first step
++
++Phase 1.1 and 1.2 together: introduce `IBlockAccess`, then split block data from block appearance. Neither changes
++what the player sees, both are testable on their own, and 1.2 is the single thing that blocks every later phase.
+-- 
+2.43.0
+
