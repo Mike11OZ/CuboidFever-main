@@ -14,7 +14,8 @@
   "properties": {
     "facing": ["north", "east", "south", "west"],
     "half": ["lower", "upper"],
-    "open": ["false", "true"]
+    "open": ["false", "true"],
+    "hinge": ["left", "right"]
   },
 
   "variants": [

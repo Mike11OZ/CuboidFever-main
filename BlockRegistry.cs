@@ -20,7 +20,7 @@ public struct BlockInfo
     public int FluidLevel;
 
     // Doors: a thin slab whose position comes from the block state (see BlockShapes). DoorFacing is 0..3.
-    public bool IsDoor, DoorOpen, DoorUpper;
+    public bool IsDoor, DoorOpen, DoorUpper, DoorHingeRight;
     public byte DoorFacing;
 
     // Which update rules the block follows when it or a neighbour changes (see BlockTickScheduler)
@@ -37,6 +37,7 @@ public sealed class BlockRegistry
     public readonly BlockInfo[] Info = new BlockInfo[256];
     private readonly TextureRegion[] _faceRegions = new TextureRegion[256 * 6];
     private readonly TextureRegion[] _edgeRegions = new TextureRegion[256];
+    private readonly TextureRegion[] _capRegions = new TextureRegion[256];
 
     public float InsetU { get; private set; }
     public float InsetV { get; private set; }
@@ -45,6 +46,9 @@ public sealed class BlockRegistry
 
     // The narrow-edge texture of a door (its "edge" texture key); other blocks just return their face 0 texture.
     public TextureRegion EdgeRegion(byte id) => _edgeRegions[id];
+
+    // The texture for the top and bottom faces of a door (its "cap" key); falls back to the edge texture.
+    public TextureRegion CapRegion(byte id) => _capRegions[id];
 
     private void Bake()
     {
@@ -70,11 +74,12 @@ public sealed class BlockRegistry
                 if (!def.State.TryGetValue("facing", out string facingName) ||
                     (doorFacing = BlockShapes.FacingFromName(facingName)) < 0 ||
                     !def.State.TryGetValue("half", out string half) || (half != "lower" && half != "upper") ||
-                    !def.State.TryGetValue("open", out string open) || (open != "false" && open != "true"))
+                    !def.State.TryGetValue("open", out string open) || (open != "false" && open != "true") ||
+                    !def.State.TryGetValue("hinge", out string hinge) || (hinge != "left" && hinge != "right"))
                 {
                     throw new InvalidDataException(
                         $"Block '{name}' is a door, so it needs the properties facing (north/east/south/west), " +
-                        "half (lower/upper) and open (false/true).");
+                        "half (lower/upper), open (false/true) and hinge (left/right).");
                 }
             }
 
@@ -91,6 +96,7 @@ public sealed class BlockRegistry
                 DoorFacing = (byte)doorFacing,
                 DoorOpen = isDoor && def.State["open"] == "true",
                 DoorUpper = isDoor && def.State["half"] == "upper",
+                DoorHingeRight = isDoor && def.State["hinge"] == "right",
                 IsAir = name.Equals("cuboidfever:air", StringComparison.OrdinalIgnoreCase),
                 IsWater = isWater,
                 FluidLevel = isWater ? def.FluidLevel : -1,
@@ -113,6 +119,12 @@ public sealed class BlockRegistry
                                !string.IsNullOrWhiteSpace(edge)
                 ? TextureAtlas.Instance.GetRegion(edge)
                 : _faceRegions[id * 6];
+
+            _capRegions[id] = def.Textures != null &&
+                              def.Textures.TryGetValue("cap", out string cap) &&
+                              !string.IsNullOrWhiteSpace(cap)
+                ? TextureAtlas.Instance.GetRegion(cap)
+                : _edgeRegions[id];
         }
 
         BuildWaterTable();

@@ -253,7 +253,8 @@ public static class ChunkMesher
             Color skyColor,
             TextureRegion region,
             float uSpan,
-            bool swapUv)
+            bool swapUv,
+            bool mirrorU = false)
         {
             int start = V.Count;
 
@@ -280,6 +281,7 @@ public static class ChunkMesher
             {
                 Vector3 corner = FaceCorners[f][c];
                 Vector2 uvc = swapUv ? new Vector2(uvs[c].Y, uvs[c].X) : uvs[c];
+                if (mirrorU) uvc.X = 1f - uvc.X;
 
                 var uv = new Vector2(
                     region.U0 + _insetU + uvc.X * (widthU - 2f * _insetU),
@@ -721,8 +723,8 @@ public static class ChunkMesher
     }
 
     // A door is a thin slab (BlockShapes.DoorBox). All six faces are always drawn: the slab never hides a neighbour,
-    // and you can see both sides of it. The wide faces use the block's main texture and the four narrow ones its
-    // "edge" texture; both come from the state, so the lower and upper halves can look different.
+    // and you can see both sides of it. The wide faces use the block's main texture, the top and bottom its "cap"
+    // texture and the two end faces its "edge" texture; all come from the state, so the halves can differ.
     private static void MeshDoor(
         Buffers b,
         in BlockInfo self,
@@ -739,6 +741,7 @@ public static class ChunkMesher
 
         TextureRegion front = registry.FastRegion(id, 0);
         TextureRegion edge = registry.EdgeRegion(id);
+        TextureRegion cap = registry.CapRegion(id);
 
         for (int f = 0; f < 6; f++)
         {
@@ -757,9 +760,11 @@ public static class ChunkMesher
                 bmax,
                 color,
                 skyColor,
-                wide ? front : edge,
+                wide ? front : axis == 1 ? cap : edge,
                 wide ? 1f : BlockShapes.DoorThickness,
-                swapUv: axis == 1 && !thinInX);
+                swapUv: axis == 1 && !thinInX,
+                // Hinge on the right: mirror the front so the handle stays on the free edge and pairs match
+                mirrorU: wide && self.DoorHingeRight);
         }
     }
 

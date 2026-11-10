@@ -30,33 +30,70 @@ public class BlockShapesTests
     [Fact]
     public void ClosedDoorLiesOnTheEdgeBehindThePlayer()
     {
-        BlockShapes.DoorBox(0, false, out var min, out var max); // looking north, so the door is on the south edge
+        BlockShapes.DoorBox(0, false, false, out var min, out var max); // looking north, so the door is on the south edge
         AssertBox(min, max, 0f, 1f, 1f - T, 1f);
 
-        BlockShapes.DoorBox(1, false, out min, out max);          // looking east: west edge
+        BlockShapes.DoorBox(1, false, false, out min, out max);          // looking east: west edge
         AssertBox(min, max, 0f, T, 0f, 1f);
 
-        BlockShapes.DoorBox(2, false, out min, out max);          // looking south: north edge
+        BlockShapes.DoorBox(2, false, false, out min, out max);          // looking south: north edge
         AssertBox(min, max, 0f, 1f, 0f, T);
 
-        BlockShapes.DoorBox(3, false, out min, out max);          // looking west: east edge
+        BlockShapes.DoorBox(3, false, false, out min, out max);          // looking west: east edge
         AssertBox(min, max, 1f - T, 1f, 0f, 1f);
     }
 
     [Fact]
     public void OpenDoorSwingsToThePlayersLeft()
     {
-        BlockShapes.DoorBox(0, true, out var min, out var max);   // looking north, left is west
+        BlockShapes.DoorBox(0, true, false, out var min, out var max);   // looking north, left is west
         AssertBox(min, max, 0f, T, 0f, 1f);
 
-        BlockShapes.DoorBox(1, true, out min, out max);           // looking east, left is north
+        BlockShapes.DoorBox(1, true, false, out min, out max);           // looking east, left is north
         AssertBox(min, max, 0f, 1f, 0f, T);
 
-        BlockShapes.DoorBox(2, true, out min, out max);           // looking south, left is east
+        BlockShapes.DoorBox(2, true, false, out min, out max);           // looking south, left is east
         AssertBox(min, max, 1f - T, 1f, 0f, 1f);
 
-        BlockShapes.DoorBox(3, true, out min, out max);           // looking west, left is south
+        BlockShapes.DoorBox(3, true, false, out min, out max);           // looking west, left is south
         AssertBox(min, max, 0f, 1f, 1f - T, 1f);
+    }
+
+    [Fact]
+    public void RightHingedOpenDoorSwingsToThePlayersRight()
+    {
+        BlockShapes.DoorBox(0, true, true, out var min, out var max);   // looking north, right is east
+        AssertBox(min, max, 1f - T, 1f, 0f, 1f);
+
+        BlockShapes.DoorBox(1, true, true, out min, out max);           // looking east, right is south
+        AssertBox(min, max, 0f, 1f, 1f - T, 1f);
+
+        BlockShapes.DoorBox(2, true, true, out min, out max);           // looking south, right is west
+        AssertBox(min, max, 0f, T, 0f, 1f);
+
+        BlockShapes.DoorBox(3, true, true, out min, out max);           // looking west, right is north
+        AssertBox(min, max, 0f, 1f, 0f, T);
+    }
+
+    [Fact]
+    public void HingeSideDoesNotChangeAClosedDoor()
+    {
+        for (int facing = 0; facing < 4; facing++)
+        {
+            BlockShapes.DoorBox(facing, false, false, out var minL, out var maxL);
+            BlockShapes.DoorBox(facing, false, true, out var minR, out var maxR);
+
+            Assert.True(minL == minR && maxL == maxR);
+        }
+    }
+
+    [Fact]
+    public void LeftOfPointsTowardThePlayersLeft()
+    {
+        Assert.Equal((-1, 0), BlockShapes.LeftOf(0)); // looking north, left is west (-X)
+        Assert.Equal((0, -1), BlockShapes.LeftOf(1)); // looking east, left is north (-Z)
+        Assert.Equal((1, 0), BlockShapes.LeftOf(2));  // looking south, left is east (+X)
+        Assert.Equal((0, 1), BlockShapes.LeftOf(3));  // looking west, left is south (+Z)
     }
 
     [Fact]
@@ -78,7 +115,7 @@ public class BlockShapesTests
     public void RayHitsTheSlabButPassesThroughTheGap()
     {
         // Closed door facing north: slab at z in [13/16, 1] of block (0, 0, 0)
-        BlockShapes.DoorBox(0, false, out var min, out var max);
+        BlockShapes.DoorBox(0, false, false, out var min, out var max);
 
         Assert.True(BlockShapes.RayHitsBox(new Vector3(0.5f, 0.5f, 3f), new Vector3(0, 0, -1), min, max, 5f));
         Assert.False(BlockShapes.RayHitsBox(new Vector3(0.5f, 0.5f, 3f), new Vector3(0, 0, -1), min, max, 1.5f)); // too short
@@ -89,7 +126,7 @@ public class BlockShapesTests
     [Fact]
     public void RayParallelToAnAxisIsHandled()
     {
-        BlockShapes.DoorBox(0, false, out var min, out var max);
+        BlockShapes.DoorBox(0, false, false, out var min, out var max);
 
         // Travelling along the slab's wide face, inside its thickness
         Assert.True(BlockShapes.RayHitsBox(new Vector3(-2f, 0.5f, 0.95f), new Vector3(1, 0, 0), min, max, 5f));

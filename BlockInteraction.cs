@@ -180,6 +180,12 @@ public sealed class BlockInteraction
 
         byte door = registry.GetDefaultState(_hotbar.SelectedId);
         door = registry.WithState(door, "facing", facing);
+
+        // Next to a door of the same facing whose hinge is on the outside, hinge on the other side to make a
+        // double door; otherwise the hinge is on the left.
+        bool hingeRight = HingeForNewDoor(x, y, z, BlockShapes.FacingFromName(facing), out bool neighborOpen);
+        door = registry.WithState(door, "hinge", hingeRight ? "right" : "left");
+        if (hingeRight) door = registry.WithState(door, "open", neighborOpen ? "true" : "false"); // match its pair
         byte lower = registry.WithState(door, "half", "lower");
         byte upper = registry.WithState(door, "half", "upper");
 
@@ -200,25 +206,67 @@ public sealed class BlockInteraction
     private bool TryUseTarget()
     {
         var (x, y, z) = Target;
+        var registry = BlockRegistry.Instance;
+        var info = registry.Info;
         byte block = _world.GetBlock(x, y, z);
-        var info = BlockRegistry.Instance.Info;
         if (!info[block].IsDoor) return false;
 
-        var registry = BlockRegistry.Instance;
         string open = info[block].DoorOpen ? "false" : "true";
 
+        SetDoorOpen(x, y, z, open);
+
+        // A double door opens and closes as one: the matching door beside this one follows
+        if (TryGetDoubleDoorPartner(x, y, z, out int pairX, out int pairZ))
+            SetDoorOpen(pairX, y, pairZ, open);
+
+        // No dedicated door sounds yet, so reuse the block sounds
+        _audioManager?.PlaySound(open == "true" ? "place" : "break", 0.6f);
+        return true;
+    }
+
+    // Sets the open state of the door at (x, y, z) and of its other half.
+    private void SetDoorOpen(int x, int y, int z, string open)
+    {
+        var registry = BlockRegistry.Instance;
+
+        byte block = _world.GetBlock(x, y, z);
         _world.SetBlock(x, y, z, registry.WithState(block, "open", open));
 
-        // Keep the other half in step with this one
         if (TryGetDoorPartner(x, y, z, out int partnerY))
         {
             byte partner = _world.GetBlock(x, partnerY, z);
             _world.SetBlock(x, partnerY, z, registry.WithState(partner, "open", open));
         }
+    }
 
-        // No dedicated door sounds yet, so reuse the block sounds
-        _audioManager?.PlaySound(open == "true" ? "place" : "break", 0.6f);
-        return true;
+    // True when a door placed at (x, y, z) should hang its hinge on the right: there is a left-hinged door of the
+    // same facing on its left, so the two make a double door with the hinges on the outside.
+    private bool HingeForNewDoor(int x, int y, int z, int facing, out bool neighborOpen)
+    {
+        var (dx, dz) = BlockShapes.LeftOf(facing);
+        var other = BlockRegistry.Instance.Info[_world.GetBlock(x + dx, y, z + dz)];
+
+        neighborOpen = other.DoorOpen;
+        return other.IsDoor && !other.DoorUpper && other.DoorFacing == facing && !other.DoorHingeRight;
+    }
+
+    // The door that forms a double door with the one at (x, y, z): beside it, same facing and half, hinge on the
+    // opposite side. A left-hinged door's partner is on its right and a right-hinged door's is on its left.
+    private bool TryGetDoubleDoorPartner(int x, int y, int z, out int pairX, out int pairZ)
+    {
+        var info = BlockRegistry.Instance.Info;
+        var self = info[_world.GetBlock(x, y, z)];
+
+        var (lx, lz) = BlockShapes.LeftOf(self.DoorFacing);
+        int side = self.DoorHingeRight ? 1 : -1;
+        pairX = x + lx * side;
+        pairZ = z + lz * side;
+
+        var other = info[_world.GetBlock(pairX, y, pairZ)];
+        return other.IsDoor
+            && other.DoorUpper == self.DoorUpper
+            && other.DoorFacing == self.DoorFacing
+            && other.DoorHingeRight != self.DoorHingeRight;
     }
 
     // The other half of the door at (x, y, z), if it is there and really is the matching half.
