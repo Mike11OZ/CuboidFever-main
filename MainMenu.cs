@@ -188,8 +188,8 @@ public sealed class MainMenu
         if (_font != null)
         {
             // Everything is drawn at the GUI scale, so the title and version text grow with the buttons
-            int scale = GuiScale.For(graphics);
-            float titleScale = TitleScale * scale;
+            float scale = GuiScale.For(graphics);
+            float titleScale = TitleScale * GuiScale.Text(scale);
 
             Vector2 titleSize = _font.MeasureString(GameInfo.Title);
 
@@ -216,9 +216,10 @@ public sealed class MainMenu
             // Left out on the world list, where the Back button would sit on top of it
             if (!_showingWorldList && !_showingNewWorld)
             {
+                float versionScale = GuiScale.Text(scale);
                 var versionPos = new Vector2(
-                    12 * scale,
-                    screenHeight - (_font.LineSpacing + 8) * scale
+                    GuiScale.Pixels(12 * scale),
+                    screenHeight - GuiScale.Pixels((_font.LineSpacing + 8) * versionScale)
                 );
 
                 sprites.DrawString(
@@ -228,7 +229,7 @@ public sealed class MainMenu
                     new Color(90, 84, 122),
                     0f,
                     Vector2.Zero,
-                    scale,
+                    versionScale,
                     SpriteEffects.None,
                     0f
                 );

@@ -31,21 +31,22 @@ public sealed class NoticeBanner
     {
         if (!_notice.IsActive || _font == null) return;
 
-        int scale = GuiScale.For(_graphics);
+        float scale = GuiScale.For(_graphics);
         int screenWidth = _graphics.Viewport.Width;
         float fade = _notice.Opacity;
 
-        int padding = 10 * scale;
-        int width = System.Math.Min(520 * scale, screenWidth - 2 * WorldListLayout.ScreenMargin);
-        var lines = TextWrap.Wrap(_notice.Text, s => _font.MeasureString(s).X * scale, width - 2 * padding, 3);
+        int padding = GuiScale.Pixels(10 * scale);
+        int width = System.Math.Min(GuiScale.Pixels(520 * scale), screenWidth - 2 * WorldListLayout.ScreenMargin);
+        var lines = TextWrap.Wrap(_notice.Text, s => _font.MeasureString(s).X * GuiScale.Text(scale), width - 2 * padding, 3);
         if (lines.Count == 0) return;
 
-        int lineHeight = _font.LineSpacing * scale;
+        float textScale = GuiScale.Text(scale);
+        int lineHeight = GuiScale.Pixels(_font.LineSpacing * textScale);
         int height = lines.Count * lineHeight + 2 * padding;
-        var box = new Rectangle((screenWidth - width) / 2, 8 * scale, width, height);
+        var box = new Rectangle((screenWidth - width) / 2, GuiScale.Pixels(8 * scale), width, height);
 
         sprites.Draw(_pixel, box, new Color(140, 70, 82) * fade);
-        int border = 2 * scale;
+        int border = GuiScale.Pixels(2 * scale);
         sprites.Draw(_pixel,
             new Rectangle(box.X + border, box.Y + border, box.Width - 2 * border, box.Height - 2 * border),
             new Color(60, 26, 36) * fade);
@@ -53,7 +54,7 @@ public sealed class NoticeBanner
         for (int i = 0; i < lines.Count; i++)
         {
             sprites.DrawString(_font, lines[i], new Vector2(box.X + padding, box.Y + padding + i * lineHeight),
-                new Color(245, 235, 238) * fade, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
+                new Color(245, 235, 238) * fade, 0f, Vector2.Zero, textScale, SpriteEffects.None, 0f);
         }
     }
 }

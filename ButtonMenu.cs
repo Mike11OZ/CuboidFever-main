@@ -112,7 +112,7 @@ public sealed class ButtonMenu
     /// Total height of all buttons + gaps, in pixels, at the given GUI scale.
     /// Used by menus that need to vertically center the whole stack.
     /// </summary>
-    public float GetTotalHeight(int scale)
+    public float GetTotalHeight(float scale)
     {
         if (_buttons.Count == 0) return 0f;
         return (DesignHeight * _buttons.Count + DesignGap * (_buttons.Count - 1)) * scale;
@@ -180,9 +180,8 @@ public sealed class ButtonMenu
     // The caller owns sprites.Begin/End so it can draw other things (a title) in the same batch.
     public void Draw(SpriteBatch sprites)
     {
-        // The text is drawn at the same scale as the button, so the two always keep the same proportions.
-        int scale = GuiScale.For(_graphics);
-        int borderThickness = DesignBorder * scale;
+        float scale = GuiScale.For(_graphics);
+        int borderThickness = GuiScale.Pixels(DesignBorder * scale);
 
         for (int i = 0; i < _buttons.Count; i++)
         {
@@ -203,22 +202,22 @@ public sealed class ButtonMenu
 
             if (_font == null) continue;
 
-            // Whole pixels only, so the text isn't smeared across pixel boundaries.
             string label = _buttons[i].Label();
-            Vector2 size = _font.MeasureString(label) * scale;
+            float textScale = GuiScale.Text(scale);
+            Vector2 size = _font.MeasureString(label) * textScale;
 
-            // A label wider than its button is drawn smaller so it fits, instead of running off the sides
-            float textScale = scale;
-            float room = rect.Width - borderThickness * 2 - 8 * scale;
-            if (size.X > room && size.X > 0)
+            // Shrink unusually long labels further so they stay inside the button.
+            float room = rect.Width - borderThickness * 2 - GuiScale.Pixels(8 * scale);
+            if (size.X > room && size.X > 0f)
             {
-                textScale = scale * room / size.X;
-                size *= room / size.X;
+                float fit = room / size.X;
+                textScale *= fit;
+                size *= fit;
             }
 
             var pos = new Vector2(
-                (int)(rect.X + (rect.Width - size.X) / 2f),
-                (int)(rect.Y + rect.Height / 2f - _capCenterY * textScale)
+                MathF.Round(rect.X + (rect.Width - size.X) / 2f),
+                MathF.Round(rect.Y + rect.Height / 2f - _capCenterY * textScale)
             );
 
             sprites.DrawString(_font, label, pos, TextColor, 0f, Vector2.Zero, textScale, SpriteEffects.None, 0f);
@@ -231,14 +230,14 @@ public sealed class ButtonMenu
         int screenWidth = _graphics.Viewport.Width;
         int screenHeight = _graphics.Viewport.Height;
 
-        int scale = GuiScale.For(_graphics);
+        float scale = GuiScale.For(_graphics);
 
-        int width = Math.Min(DesignWidth * scale, screenWidth - ScreenMargin * 2);
-        int height = DesignHeight * scale;
-        int gap = DesignGap * scale;
+        int width = Math.Max(1, Math.Min(GuiScale.Pixels(DesignWidth * scale), screenWidth - ScreenMargin * 2));
+        int height = Math.Max(1, GuiScale.Pixels(DesignHeight * scale));
+        int gap = GuiScale.Pixels(DesignGap * scale);
 
         int x = (screenWidth - width) / 2;
-        int y = (int)(screenHeight * Top) + index * (height + gap);
+        int y = GuiScale.Pixels(screenHeight * Top) + index * (height + gap);
 
         return new Rectangle(x, y, width, height);
     }

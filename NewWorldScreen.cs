@@ -99,19 +99,19 @@ public sealed class NewWorldScreen
         public int ButtonsTop { get; init; }
     }
 
-    private Layout Measure(int scale)
+    private Layout Measure(float scale)
     {
         int screenWidth = _graphics.Viewport.Width;
-        int width = Math.Min(DesignWidth * scale, screenWidth - 2 * WorldListLayout.ScreenMargin);
+        int width = Math.Min(GuiScale.Pixels(DesignWidth * scale), screenWidth - 2 * WorldListLayout.ScreenMargin);
         int x = (screenWidth - width) / 2;
 
-        int labelHeight = ((_text?.LineSpacing ?? 16) + 4) * scale;
-        int fieldHeight = DesignFieldHeight * scale;
+        int labelHeight = GuiScale.Pixels(((_text?.LineSpacing ?? 16) + 4) * GuiScale.Text(scale));
+        int fieldHeight = GuiScale.Pixels(DesignFieldHeight * scale);
 
-        int y = 72 * scale; // below the heading, the same height as the world list's header
+        int y = GuiScale.Pixels(72 * scale); // below the heading, the same height as the world list's header
         var nameBox = new Rectangle(x, y + labelHeight, width, fieldHeight);
 
-        int seedY = nameBox.Bottom + 14 * scale;
+        int seedY = nameBox.Bottom + GuiScale.Pixels(14 * scale);
         var seedBox = new Rectangle(x, seedY + labelHeight, width, fieldHeight);
 
         return new Layout
@@ -120,7 +120,7 @@ public sealed class NewWorldScreen
             NameBox = nameBox,
             SeedLabel = new Point(x, seedY),
             SeedBox = seedBox,
-            ButtonsTop = seedBox.Bottom + 24 * scale
+            ButtonsTop = seedBox.Bottom + GuiScale.Pixels(24 * scale)
         };
     }
 
@@ -128,7 +128,7 @@ public sealed class NewWorldScreen
 
     public void Update(ActionInput input, float deltaTime)
     {
-        int scale = GuiScale.For(_graphics);
+        float scale = GuiScale.For(_graphics);
         Layout layout = Measure(scale);
 
         _time += deltaTime;
@@ -157,19 +157,20 @@ public sealed class NewWorldScreen
     // The caller (MainMenu) has a SpriteBatch open and ends it.
     public void Draw(SpriteBatch sprites)
     {
-        int scale = GuiScale.For(_graphics);
+        float scale = GuiScale.For(_graphics);
         int screenWidth = _graphics.Viewport.Width;
         Layout layout = Measure(scale);
 
         if (_font != null)
         {
             const string heading = "Create New World";
-            Vector2 size = _font.MeasureString(heading) * scale;
+            float textScale = GuiScale.Text(scale);
+            Vector2 size = _font.MeasureString(heading) * textScale;
             var pos = new Vector2(
                 MathF.Round((screenWidth - size.X) / 2f),
-                MathF.Round((72 * scale - size.Y) / 2f));
+                MathF.Round((GuiScale.Pixels(72 * scale) - size.Y) / 2f));
 
-            sprites.DrawString(_font, heading, pos, TextColor, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
+            sprites.DrawString(_font, heading, pos, TextColor, 0f, Vector2.Zero, textScale, SpriteEffects.None, 0f);
         }
 
         DrawLabel(sprites, "World Name", layout.NameLabel, scale);
@@ -181,53 +182,54 @@ public sealed class NewWorldScreen
         _buttons.Draw(sprites);
     }
 
-    private void DrawLabel(SpriteBatch sprites, string label, Point at, int scale)
+    private void DrawLabel(SpriteBatch sprites, string label, Point at, float scale)
     {
         if (_text == null) return;
-        sprites.DrawString(_text, label, new Vector2(at.X, at.Y), DimTextColor, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
+        sprites.DrawString(_text, label, new Vector2(at.X, at.Y), DimTextColor, 0f, Vector2.Zero, GuiScale.Text(scale), SpriteEffects.None, 0f);
     }
 
-    private void DrawField(SpriteBatch sprites, Rectangle box, string text, string placeholder, bool focused, int scale)
+    private void DrawField(SpriteBatch sprites, Rectangle box, string text, string placeholder, bool focused, float scale)
     {
-        int border = DesignBorder * scale;
+        int border = GuiScale.Pixels(DesignBorder * scale);
 
         sprites.Draw(_pixel, box, focused ? BorderFocusColor : BorderColor);
         sprites.Draw(_pixel, new Rectangle(box.X + border, box.Y + border, box.Width - border * 2, box.Height - border * 2), FillColor);
 
         if (_text == null) return;
 
-        int padding = 8 * scale;
-        int caretWidth = 2 * scale;
+        int padding = GuiScale.Pixels(8 * scale);
+        int caretWidth = GuiScale.Pixels(2 * scale);
         int room = box.Width - border * 2 - padding * 2 - caretWidth;
 
-        int textY = box.Y + (box.Height - _text.LineSpacing * scale) / 2;
+        float textScale = GuiScale.Text(scale);
+        int textY = box.Y + (box.Height - GuiScale.Pixels(_text.LineSpacing * textScale)) / 2;
         int textX = box.X + border + padding;
 
         if (text.Length == 0)
         {
             // Faint hint for what happens if the box is left empty
             if (placeholder.Length > 0)
-                sprites.DrawString(_text, Tail(placeholder, room, scale), new Vector2(textX, textY), DimTextColor, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
+                sprites.DrawString(_text, Tail(placeholder, room, textScale), new Vector2(textX, textY), DimTextColor, 0f, Vector2.Zero, textScale, SpriteEffects.None, 0f);
         }
         else
         {
-            sprites.DrawString(_text, Tail(text, room, scale), new Vector2(textX, textY), TextColor, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
+            sprites.DrawString(_text, Tail(text, room, textScale), new Vector2(textX, textY), TextColor, 0f, Vector2.Zero, textScale, SpriteEffects.None, 0f);
         }
 
         // Blinking caret after the text, only in the box being typed in
         if (focused && ((int)(_time * 2f) % 2 == 0))
         {
-            int shown = (int)(_text.MeasureString(Tail(text, room, scale)).X * scale);
-            var caret = new Rectangle(textX + shown + scale, textY, caretWidth, _text.LineSpacing * scale);
+            int shown = (int)(_text.MeasureString(Tail(text, room, textScale)).X * textScale);
+            var caret = new Rectangle(textX + shown + GuiScale.Pixels(textScale), textY, caretWidth, GuiScale.Pixels(_text.LineSpacing * textScale));
             sprites.Draw(_pixel, caret, TextColor);
         }
     }
 
     // The end of the text that fits in the given width, so while typing the newest characters stay visible.
     // Everything typed is plain keyboard characters, which the font always has.
-    private string Tail(string text, int maxWidth, int scale)
+    private string Tail(string text, int maxWidth, float textScale)
     {
-        while (text.Length > 0 && _text.MeasureString(text).X * scale > maxWidth)
+        while (text.Length > 0 && _text.MeasureString(text).X * textScale > maxWidth)
             text = text.Substring(1);
 
         return text;

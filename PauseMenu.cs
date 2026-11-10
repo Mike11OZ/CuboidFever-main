@@ -50,7 +50,7 @@ public sealed class PauseMenu
         _buttons.Add("Settings", () => SettingsRequested?.Invoke());
 
         _buttons.Add(
-            "Save and Quit to Title",
+            "Exit World",
             () => ExitWorldRequested?.Invoke(),
             MenuButtonSound.Back
         );

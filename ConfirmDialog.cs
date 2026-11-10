@@ -71,7 +71,7 @@ public sealed class ConfirmDialog
     {
         if (!IsOpen) return;
 
-        int scale = GuiScale.For(_graphics);
+        float scale = GuiScale.For(_graphics);
         int screenWidth = _graphics.Viewport.Width;
         int screenHeight = _graphics.Viewport.Height;
 
@@ -79,11 +79,11 @@ public sealed class ConfirmDialog
 
         if (_text != null)
         {
-            int maxWidth = Math.Min(560 * scale, screenWidth - 2 * WorldListLayout.ScreenMargin);
-            var lines = TextWrap.Wrap(_message, s => _text.MeasureString(s).X * scale, maxWidth, MaxMessageLines);
+            int maxWidth = Math.Min(GuiScale.Pixels(560 * scale), screenWidth - 2 * WorldListLayout.ScreenMargin);
+            var lines = TextWrap.Wrap(_message, s => _text.MeasureString(s).X * GuiScale.Text(scale), maxWidth, MaxMessageLines);
 
-            int lineHeight = (_text.LineSpacing + 6) * scale;
-            int bottom = (int)(screenHeight * 0.52f) - 16 * scale;        // just above the buttons
+            int lineHeight = GuiScale.Pixels((_text.LineSpacing + 6) * GuiScale.Text(scale));
+            int bottom = GuiScale.Pixels(screenHeight * 0.52f) - GuiScale.Pixels(16 * scale);        // just above the buttons
             int top = bottom - (lines.Count + 1) * lineHeight;             // heading plus the message lines
 
             DrawCentered(sprites, _heading, screenWidth, top, scale, TextColor);
@@ -95,11 +95,12 @@ public sealed class ConfirmDialog
         _buttons.Draw(sprites);
     }
 
-    private void DrawCentered(SpriteBatch sprites, string text, int screenWidth, int y, int scale, Color color)
+    private void DrawCentered(SpriteBatch sprites, string text, int screenWidth, int y, float scale, Color color)
     {
-        Vector2 size = _text.MeasureString(text) * scale;
+        float textScale = GuiScale.Text(scale);
+        Vector2 size = _text.MeasureString(text) * textScale;
         var pos = new Vector2(MathF.Round((screenWidth - size.X) / 2f), y);
 
-        sprites.DrawString(_text, text, pos, color, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
+        sprites.DrawString(_text, text, pos, color, 0f, Vector2.Zero, textScale, SpriteEffects.None, 0f);
     }
 }

@@ -53,8 +53,8 @@ public sealed class Hud
 
     private void DrawCrosshair()
     {
-        int scale = GuiScale.For(_gd);
-        int length = CrosshairLength * scale, thickness = CrosshairThickness * scale;
+        float scale = GuiScale.For(_gd);
+        int length = GuiScale.Pixels(CrosshairLength * scale), thickness = GuiScale.Pixels(CrosshairThickness * scale);
 
         int cx = _gd.Viewport.Width / 2, cy = _gd.Viewport.Height / 2;
         _sprites.Draw(_pixel, new Rectangle(cx - length / 2, cy - thickness / 2, length, thickness), Color.White);
@@ -66,8 +66,8 @@ public sealed class Hud
         var registry = BlockRegistry.Instance;
         byte id = _hotbar.SelectedId;
 
-        int scale = GuiScale.For(_gd);
-        int iconSize = IconSize * scale, iconPad = IconPad * scale, iconBorder = IconBorder * scale;
+        float scale = GuiScale.For(_gd);
+        int iconSize = GuiScale.Pixels(IconSize * scale), iconPad = GuiScale.Pixels(IconPad * scale), iconBorder = GuiScale.Pixels(IconBorder * scale);
 
         var src = registry.GetTextureRegion(id, 0).PixelBounds;
         var dest = new Rectangle(iconPad, _gd.Viewport.Height - iconPad - iconSize, iconSize, iconSize);

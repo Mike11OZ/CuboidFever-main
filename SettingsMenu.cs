@@ -186,13 +186,13 @@ public sealed class SettingsMenu
 
     private void UpdateLayout()
     {
-        int scale = GuiScale.For(_graphics);
+        float scale = GuiScale.For(_graphics);
         int screenHeight = _graphics.Viewport.Height;
 
         const float TitleTopFraction = 0.17f;
         _titleY = screenHeight * TitleTopFraction;
 
-        float titleHeight = _font != null ? _font.LineSpacing * TitleScale * scale : 0f;
+        float titleHeight = _font != null ? _font.LineSpacing * TitleScale * GuiScale.Text(scale) : 0f;
         float margin = DesignMargin * scale;
 
         float buttonsTop = _titleY + titleHeight + margin;
@@ -230,7 +230,7 @@ public sealed class SettingsMenu
 
         if (_font != null)
         {
-            float titleScale = TitleScale * GuiScale.For(graphics);
+            float titleScale = TitleScale * GuiScale.Text(GuiScale.For(graphics));
             Vector2 titleSize = _font.MeasureString(Title) * titleScale;
 
             var titlePos = new Vector2(

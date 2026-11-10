@@ -123,7 +123,7 @@ public sealed class WorldListScreen
 
     public void Update(ActionInput input)
     {
-        int scale = GuiScale.For(_graphics);
+        float scale = GuiScale.For(_graphics);
         ListMetrics m = Metrics();
         Point mouse = input.MousePosition;
 
@@ -201,15 +201,15 @@ public sealed class WorldListScreen
             DeleteRequested?.Invoke(_rows[index].Entry.FolderPath);
     }
 
-    private Rectangle DeleteButtonRect(int index, ListMetrics m, int scale)
+    private Rectangle DeleteButtonRect(int index, ListMetrics m, float scale)
     {
         Rectangle row = RowRect(index, m);
-        int labelWidth = _text == null ? 0 : (int)(_text.MeasureString("Delete").X * scale);
+        int labelWidth = _text == null ? 0 : GuiScale.Pixels(_text.MeasureString("Delete").X * GuiScale.Text(scale));
         var (x, y, w, h) = WorldListLayout.DeleteButtonRect(row.X, row.Y, row.Width, row.Height, scale, labelWidth);
         return new Rectangle(x, y, w, h);
     }
 
-    private static int MinThumb(int scale) => DesignMinScrollbarThumb * scale;
+    private static int MinThumb(float scale) => GuiScale.Pixels(DesignMinScrollbarThumb * scale);
 
     // The scrollbar's column, a little wider than it is drawn so it is easy to grab
     private static bool InScrollbar(Point mouse, ListMetrics m)
@@ -228,7 +228,7 @@ public sealed class WorldListScreen
     // clipping to the viewport (a scissor rectangle), and that is a setting of Begin.
     public void Draw(SpriteBatch sprites)
     {
-        int scale = GuiScale.For(_graphics);
+        float scale = GuiScale.For(_graphics);
         int screenWidth = _graphics.Viewport.Width;
         ListMetrics m = Metrics();
 
@@ -268,7 +268,7 @@ public sealed class WorldListScreen
     }
 
     // Dims everything and asks the question, with the two buttons below it
-    private void DrawConfirm(SpriteBatch sprites, int screenWidth, int scale)
+    private void DrawConfirm(SpriteBatch sprites, int screenWidth, float scale)
     {
         int screenHeight = _graphics.Viewport.Height;
         sprites.Draw(_pixel, new Rectangle(0, 0, screenWidth, screenHeight), Color.Black * 0.75f);
@@ -276,15 +276,16 @@ public sealed class WorldListScreen
         if (_text != null)
         {
             string name = FitText(WorldListLayout.DisplayName(_rows[_confirmIndex].Entry.Name),
-                                  screenWidth - 2 * WorldListLayout.ScreenMargin * scale, scale);
+                                  screenWidth - GuiScale.Pixels(2 * WorldListLayout.ScreenMargin * scale), scale);
 
             int middle = (int)(screenHeight * 0.5f);
-            int line = (_text.LineSpacing + 8) * scale;
+            float textScale = GuiScale.Text(scale);
+            int line = GuiScale.Pixels((_text.LineSpacing + 8) * textScale);
 
             DrawCentered(sprites, "Delete this world?", screenWidth, middle - 3 * line, scale, TextColor);
             DrawCentered(sprites, name, screenWidth, middle - 2 * line, scale, TextColor);
             string warning = FitText("It will be gone for good. This cannot be undone.",
-                                     screenWidth - 2 * WorldListLayout.ScreenMargin * scale, scale);
+                                     screenWidth - GuiScale.Pixels(2 * WorldListLayout.ScreenMargin * scale), scale);
             DrawCentered(sprites, warning, screenWidth, middle - line, scale, DimTextColor);
         }
 
@@ -306,8 +307,8 @@ public sealed class WorldListScreen
     {
         if (_font == null) return;
 
-        int scale = GuiScale.For(_graphics);
-        float titleScale = TitleScale * scale;
+        float scale = GuiScale.For(_graphics);
+        float titleScale = TitleScale * GuiScale.Text(scale);
         Vector2 size = _font.MeasureString("Select World") * titleScale;
 
         var pos = new Vector2(
@@ -318,27 +319,28 @@ public sealed class WorldListScreen
         sprites.DrawString(_font, "Select World", pos, TextColor, 0f, Vector2.Zero, titleScale, SpriteEffects.None, 0f);
     }
 
-    private void DrawCentered(SpriteBatch sprites, string text, int screenWidth, int centerY, int scale, Color color)
+    private void DrawCentered(SpriteBatch sprites, string text, int screenWidth, int centerY, float scale, Color color)
     {
         if (_text == null) return;
 
-        Vector2 size = _text.MeasureString(text) * scale;
+        float textScale = GuiScale.Text(scale);
+        Vector2 size = _text.MeasureString(text) * textScale;
         var pos = new Vector2(MathF.Round((screenWidth - size.X) / 2f), MathF.Round(centerY - size.Y / 2f));
 
-        sprites.DrawString(_text, text, pos, color, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
+        sprites.DrawString(_text, text, pos, color, 0f, Vector2.Zero, textScale, SpriteEffects.None, 0f);
     }
 
     private Rectangle RowRect(int index, ListMetrics m) =>
         new(m.Left, m.Top + index * m.Stride - _scroll, m.Width, m.RowHeight);
 
     // The part of a row inside its border, where the picture and text go
-    private static Rectangle Inner(Rectangle row, int scale)
+    private static Rectangle Inner(Rectangle row, float scale)
     {
-        int border = DesignBorder * scale;
+        int border = GuiScale.Pixels(DesignBorder * scale);
         return new Rectangle(row.X + border, row.Y + border, row.Width - border * 2, row.Height - border * 2);
     }
 
-    private void DrawRow(SpriteBatch sprites, int index, ListMetrics m, int scale)
+    private void DrawRow(SpriteBatch sprites, int index, ListMetrics m, float scale)
     {
         Rectangle rect = RowRect(index, m);
         bool hovered = index == _hovered;
@@ -357,42 +359,43 @@ public sealed class WorldListScreen
 
         WorldListEntry entry = _rows[index].Entry;
 
-        int textX = picture.Right + 10 * scale;
+        int textX = picture.Right + GuiScale.Pixels(10 * scale);
         Rectangle delete = DeleteButtonRect(index, m, scale);
-        int maxWidth = delete.X - textX - 8 * scale;
+        int maxWidth = delete.X - textX - GuiScale.Pixels(8 * scale);
 
         string name = FitText(WorldListLayout.DisplayName(entry.Name), maxWidth, scale);
         string played = FitText("Last played: " + FormatLastPlayed(entry.LastPlayedUtc), maxWidth, scale);
 
         // The two lines of text are centered vertically in the row
-        int blockHeight = (2 * _text.LineSpacing + 6) * scale;
+        float textScale = GuiScale.Text(scale);
+        int blockHeight = GuiScale.Pixels((2 * _text.LineSpacing + 6) * textScale);
         int nameY = inner.Y + (inner.Height - blockHeight) / 2;
-        int playedY = nameY + (_text.LineSpacing + 6) * scale;
+        int playedY = nameY + GuiScale.Pixels((_text.LineSpacing + 6) * textScale);
 
-        sprites.DrawString(_text, name, new Vector2(textX, nameY), TextColor, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
-        sprites.DrawString(_text, played, new Vector2(textX, playedY), DimTextColor, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
+        sprites.DrawString(_text, name, new Vector2(textX, nameY), TextColor, 0f, Vector2.Zero, textScale, SpriteEffects.None, 0f);
+        sprites.DrawString(_text, played, new Vector2(textX, playedY), DimTextColor, 0f, Vector2.Zero, textScale, SpriteEffects.None, 0f);
 
         // Delete button: dark red, brighter when the mouse is on it
         bool deleteHot = hovered && _hoverDelete;
-        int border = DesignBorder * scale;
+        int border = GuiScale.Pixels(DesignBorder * scale);
 
         sprites.Draw(_pixel, delete, deleteHot ? BorderHoverColor : DeleteBorderColor);
         sprites.Draw(_pixel,
             new Rectangle(delete.X + border, delete.Y + border, delete.Width - border * 2, delete.Height - border * 2),
             deleteHot ? DeleteHoverColor : DeleteColor);
 
-        Vector2 labelSize = _text.MeasureString("Delete") * scale;
+        Vector2 labelSize = _text.MeasureString("Delete") * textScale;
         var labelPos = new Vector2(
             (int)(delete.X + (delete.Width - labelSize.X) / 2f),
             (int)(delete.Y + (delete.Height - labelSize.Y) / 2f));
-        sprites.DrawString(_text, "Delete", labelPos, TextColor, 0f, Vector2.Zero, scale, SpriteEffects.None, 0f);
+        sprites.DrawString(_text, "Delete", labelPos, TextColor, 0f, Vector2.Zero, textScale, SpriteEffects.None, 0f);
     }
 
     // The thumbnail is 16:9 and as tall as the inside of the row
     private static Rectangle PictureRect(Rectangle inner) =>
         new(inner.X, inner.Y, WorldListLayout.ThumbnailWidth(inner.Height), inner.Height);
 
-    private void DrawThumbnail(SpriteBatch sprites, int index, ListMetrics m, int scale)
+    private void DrawThumbnail(SpriteBatch sprites, int index, ListMetrics m, float scale)
     {
         Row row = _rows[index];
         EnsureThumbnail(row);
@@ -423,7 +426,7 @@ public sealed class WorldListScreen
         }
     }
 
-    private void DrawScrollbar(SpriteBatch sprites, ListMetrics m, int scale)
+    private void DrawScrollbar(SpriteBatch sprites, ListMetrics m, float scale)
     {
         var thumb = WorldListLayout.Thumb(_rows.Count, _scroll, m, MinThumb(scale));
         if (thumb == null) return; // everything fits, nothing to scroll
@@ -439,21 +442,21 @@ public sealed class WorldListScreen
 
     // Text that fits in maxWidth pixels at the given scale: characters the font lacks become '?' (a SpriteFont
     // throws on them, and a world name is the player's own text), and a too-long end is replaced by "...".
-    private string FitText(string text, int maxWidth, int scale)
+    private string FitText(string text, int maxWidth, float scale)
     {
         var fitted = new System.Text.StringBuilder(text.Length);
         foreach (char c in text)
             fitted.Append(_text.Characters.Contains(c) ? c : '?');
 
         string result = fitted.ToString();
-        if (_text.MeasureString(result).X * scale <= maxWidth) return result;
+        if (_text.MeasureString(result).X * GuiScale.Text(scale) <= maxWidth) return result;
 
         while (result.Length > 1)
         {
             result = result.Substring(0, result.Length - 1);
             string candidate = result.TrimEnd() + "...";
 
-            if (_text.MeasureString(candidate).X * scale <= maxWidth) return candidate;
+            if (_text.MeasureString(candidate).X * GuiScale.Text(scale) <= maxWidth) return candidate;
         }
 
         return result;
