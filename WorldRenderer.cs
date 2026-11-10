@@ -145,8 +145,16 @@ public sealed class WorldRenderer
     // Black wireframe box around the block being looked at.
     private void DrawTargetOutline((int x, int y, int z) target)
     {
-        var min = new Vector3(target.x, target.y, target.z) - new Vector3(0.002f);
-        var max = min + new Vector3(1.004f);
+        var min = new Vector3(target.x, target.y, target.z);
+        var max = min + Vector3.One;
+
+        // A door is outlined around its slab, not its whole block
+        var targetInfo = BlockRegistry.Instance.Info[_world.GetBlock(target.x, target.y, target.z)];
+        if (targetInfo.IsDoor)
+            BlockShapes.DoorBox(in targetInfo, target.x, target.y, target.z, out min, out max);
+
+        min -= new Vector3(0.002f);
+        max += new Vector3(0.002f);
 
         var p = new Vector3[8];
         for (int i = 0; i < 8; i++)

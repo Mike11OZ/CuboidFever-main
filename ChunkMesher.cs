@@ -240,6 +240,69 @@ public static class ChunkMesher
             }
         }
 
+        // One face of a box that sits inside a block's cell (doors). 'bmin'/'bmax' are the box corners in block-local
+        // coordinates. The texture is stretched over the whole face, except that only the leftmost 'uSpan' of its
+        // width is used (the door's 3-pixel edge strip), and 'swapUv' turns the mapping a quarter so a strip
+        // lines up with the long way of a top or bottom face.
+        public void AddBoxFace(
+            int f,
+            Vector3 pos,
+            Vector3 bmin,
+            Vector3 bmax,
+            Color color,
+            Color skyColor,
+            TextureRegion region,
+            float uSpan,
+            bool swapUv)
+        {
+            int start = V.Count;
+
+            if (_trackWaterData)
+            {
+                for (int c = 0; c < 4; c++)
+                {
+                    F!.Add((byte)f);
+                    W!.Add(0f);
+                }
+            }
+
+            float widthU = (region.U1 - region.U0) * uSpan;
+            float heightV = region.V1 - region.V0;
+            Vector2[] uvs = f == 3 ? BottomUV : FaceUV;
+            Vector3 size = bmax - bmin;
+
+            float r = color.R / 255f, g = color.G / 255f;
+            float b = color.B / 255f, a = color.A / 255f;
+            float sr = skyColor.R / 255f, sg = skyColor.G / 255f;
+            float sb = skyColor.B / 255f;
+
+            for (int c = 0; c < 4; c++)
+            {
+                Vector3 corner = FaceCorners[f][c];
+                Vector2 uvc = swapUv ? new Vector2(uvs[c].Y, uvs[c].X) : uvs[c];
+
+                var uv = new Vector2(
+                    region.U0 + _insetU + uvc.X * (widthU - 2f * _insetU),
+                    region.V0 + _insetV + uvc.Y * (heightV - 2f * _insetV));
+
+                var vertexPos = pos + bmin + new Vector3(corner.X * size.X, corner.Y * size.Y, corner.Z * size.Z);
+
+                V.Add(new VertexPositionColorTextureSky(
+                    vertexPos,
+                    new Color(r, g, b, a),
+                    uv,
+                    new Color(sr, sg, sb, 1f)));
+            }
+
+            I.Add(start + 1);
+            I.Add(start + 2);
+            I.Add(start + 3);
+
+            I.Add(start + 1);
+            I.Add(start + 3);
+            I.Add(start);
+        }
+
         public void AddCross(
             Vector3 pos,
             Color color,
@@ -545,6 +608,12 @@ public static class ChunkMesher
                 continue;
             }
 
+            if (self.IsDoor)
+            {
+                MeshDoor(b, in self, id, i, pos, tintMul, registry);
+                continue;
+            }
+
             bool cornersReady = false;
 
             for (int f = 0; f < 6; f++)
@@ -649,6 +718,49 @@ public static class ChunkMesher
         }
 
         return result;
+    }
+
+    // A door is a thin slab (BlockShapes.DoorBox). All six faces are always drawn: the slab never hides a neighbour,
+    // and you can see both sides of it. The wide faces use the block's main texture and the four narrow ones its
+    // "edge" texture; both come from the state, so the lower and upper halves can look different.
+    private static void MeshDoor(
+        Buffers b,
+        in BlockInfo self,
+        byte id,
+        int i,
+        Vector3 pos,
+        Vector3 tintMul,
+        BlockRegistry registry)
+    {
+        BlockShapes.DoorBox(in self, out Vector3 bmin, out Vector3 bmax);
+
+        bool thinInX = bmax.X - bmin.X < 0.5f;
+        int thinAxis = thinInX ? 0 : 2;
+
+        TextureRegion front = registry.FastRegion(id, 0);
+        TextureRegion edge = registry.EdgeRegion(id);
+
+        for (int f = 0; f < 6; f++)
+        {
+            int axis = f / 2;
+            bool wide = axis == thinAxis;
+
+            // The brighter of the door's own cell and the cell the face looks into
+            int lightSample = BrighterCell(b.Light, i, i + Offsets[f]);
+
+            LightColors(in self, f, lightSample, b.Light, tintMul, out var color, out var skyColor);
+
+            b.Solid.AddBoxFace(
+                f,
+                pos,
+                bmin,
+                bmax,
+                color,
+                skyColor,
+                wide ? front : edge,
+                wide ? 1f : BlockShapes.DoorThickness,
+                swapUv: axis == 1 && !thinInX);
+        }
     }
 
     private static void FillTints(

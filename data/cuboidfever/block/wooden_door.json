@@ -1,0 +1,36 @@
+{
+  "name": "cuboidfever:wooden_door",
+  "solid": true,
+  "transparent": true,
+  "fullBlock": false,
+  "replaceable": false,
+  "renderType": "door",
+  "renderLayer": "transparent",
+  "emissive": false,
+  "lightAttenuation": 0,
+  "emission": { "r": 0, "g": 0, "b": 0 },
+  "tint": [255, 255, 255],
+
+  "properties": {
+    "facing": ["north", "east", "south", "west"],
+    "half": ["lower", "upper"],
+    "open": ["false", "true"]
+  },
+
+  "variants": [
+    {
+      "when": { "half": "lower" },
+      "textures": {
+        "all": "cuboidfever:wooden_door_bottom_f",
+        "edge": "cuboidfever:wooden_door_bottom_s"
+      }
+    },
+    {
+      "when": { "half": "upper" },
+      "textures": {
+        "all": "cuboidfever:wooden_door_top_f",
+        "edge": "cuboidfever:wooden_door_top_s"
+      }
+    }
+  ]
+}

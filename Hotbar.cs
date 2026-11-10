@@ -9,13 +9,15 @@ public sealed class Hotbar
     private readonly byte[] _ids;
     private readonly string[] _names;
     private readonly ActionInput _input;
+    private readonly BlockRegistry _blocks;
 
     public Hotbar(BlockRegistry blocks, ActionInput input)
     {
         _input = input;
+        _blocks = blocks;
         _ids = blocks.HotbarIds;
         _names = _ids
-            .Select(id => blocks.GetName(id)
+            .Select(id => blocks.GetBaseName(id)
                 .Split(':').Last()
                 .Replace('_', ' '))
             .ToArray();
@@ -30,6 +32,9 @@ public sealed class Hotbar
 
     public bool TrySelectBlock(byte blockId)
     {
+        // Every state of a block (an open door facing east, say) picks the hotbar slot of its default state
+        blockId = _blocks.GetDefaultState(blockId);
+
         for (int i = 0; i < _ids.Length; i++)
         {
             if (_ids[i] == blockId)

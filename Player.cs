@@ -91,19 +91,80 @@ public class Player
             && Position.Z + hw > z && Position.Z - hw < z + 1;
     }
 
+    // True if the player's box overlaps the box (min..max) given in world coordinates. Used to stop you placing
+    // a door on top of yourself; unlike Overlaps(x, y, z) it can test a box smaller than a block.
+    public bool OverlapsBox(Vector3 min, Vector3 max)
+    {
+        float hw = Width / 2;
+        return Position.X + hw > min.X && Position.X - hw < max.X
+            && Position.Y + Height > min.Y && Position.Y < max.Y
+            && Position.Z + hw > min.Z && Position.Z - hw < max.Z;
+    }
+
     private bool Collides(World world)
     {
         float hw = Width / 2;
         int x0 = (int)MathF.Floor(Position.X - hw), x1 = (int)MathF.Floor(Position.X + hw);
         int y0 = (int)MathF.Floor(Position.Y),      y1 = (int)MathF.Floor(Position.Y + Height);
         int z0 = (int)MathF.Floor(Position.Z - hw), z1 = (int)MathF.Floor(Position.Z + hw);
+        var info = BlockRegistry.Instance.Info;
 
         for (int x = x0; x <= x1; x++)
         for (int y = y0; y <= y1; y++)
         for (int z = z0; z <= z1; z++)
-            if (world.IsSolid(x, y, z)) return true;
+        {
+            byte id = world.GetBlock(x, y, z);
+            if (!info[id].Solid) continue;
+
+            // A door only fills part of its block, so only count it when the player touches the slab itself
+            if (info[id].IsDoor)
+            {
+                BlockShapes.DoorBox(in info[id], x, y, z, out var min, out var max);
+                if (!OverlapsBox(min, max)) continue;
+            }
+
+            return true;
+        }
 
         return false;
+    }
+
+    // After a move along 'axis' ran into something, finds where the player should stop: just short of the nearest
+    // face of whatever they overlap (moving up the axis), or just past the farthest one (moving down it). A normal
+    // block's faces are on whole numbers; a door's are not.
+    private float ContactLimit(World world, int axis, bool positive)
+    {
+        float hw = Width / 2;
+        int x0 = (int)MathF.Floor(Position.X - hw), x1 = (int)MathF.Floor(Position.X + hw);
+        int y0 = (int)MathF.Floor(Position.Y),      y1 = (int)MathF.Floor(Position.Y + Height);
+        int z0 = (int)MathF.Floor(Position.Z - hw), z1 = (int)MathF.Floor(Position.Z + hw);
+        var info = BlockRegistry.Instance.Info;
+
+        float limit = positive ? float.PositiveInfinity : float.NegativeInfinity;
+
+        for (int x = x0; x <= x1; x++)
+        for (int y = y0; y <= y1; y++)
+        for (int z = z0; z <= z1; z++)
+        {
+            byte id = world.GetBlock(x, y, z);
+            if (!info[id].Solid) continue;
+
+            Vector3 min = new(x, y, z), max = new(x + 1, y + 1, z + 1);
+
+            if (info[id].IsDoor)
+            {
+                BlockShapes.DoorBox(in info[id], x, y, z, out min, out max);
+                if (!OverlapsBox(min, max)) continue;
+            }
+
+            float face = positive
+                ? (axis == 0 ? min.X : axis == 1 ? min.Y : min.Z)
+                : (axis == 0 ? max.X : axis == 1 ? max.Y : max.Z);
+
+            limit = positive ? MathF.Min(limit, face) : MathF.Max(limit, face);
+        }
+
+        return limit;
     }
 
     private float Get(int a) => a == 0 ? Position.X : a == 1 ? Position.Y : Position.Z;
@@ -134,13 +195,11 @@ public class Player
 
             if (d > 0)
             {
-                int block = (int)MathF.Floor(Get(axis) + upper);
-                Set(axis, block - upper - Eps);
+                Set(axis, ContactLimit(world, axis, positive: true) - upper - Eps);
             }
             else
             {
-                int block = (int)MathF.Floor(Get(axis) - lower);
-                Set(axis, block + 1 + lower + Eps);
+                Set(axis, ContactLimit(world, axis, positive: false) + lower + Eps);
                 if (axis == 1) OnGround = true;
             }
 

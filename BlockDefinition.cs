@@ -35,6 +35,26 @@ public class BlockDefinition
 
     public string Texture { get; set; }
     public Dictionary<string, string> Textures { get; set; } = new();
+
+    // ---- Block states ----
+    // A block that lists properties (e.g. "open": ["false", "true"]) is expanded when the registry loads into one
+    // runtime block per combination, so every state is an ordinary one-byte block ID. Chunks, saves, lighting and
+    // the palette need no changes. See BlockStates.
+    public Dictionary<string, List<string>> Properties { get; set; } = new();
+
+    // Overrides applied to the states they match, in file order (later entries win). Today that is textures only.
+    public List<BlockVariant> Variants { get; set; } = new();
+
+    // Filled in by BlockStates.Expand for each generated state; empty for blocks without properties.
+    [JsonIgnore] public string BaseName { get; set; }
+    [JsonIgnore] public SortedDictionary<string, string> State { get; set; } = new(StringComparer.Ordinal);
+}
+
+// "when" lists property values (all must match); "textures" replaces those texture keys for the matching states.
+public class BlockVariant
+{
+    public Dictionary<string, string> When { get; set; } = new();
+    public Dictionary<string, string> Textures { get; set; } = new();
 }
 
 public class EmissionData

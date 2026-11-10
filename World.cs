@@ -610,8 +610,19 @@ public class World : IDisposable
             byte b = GetBlock(x, y, z);
             if (b != _airId && !blockInfo[b].IsWater)
             {
-                hit = (x, y, z);
-                return true;
+                // A door fills only part of its block: a ray through the empty part carries on
+                bool solidHit = true;
+                if (blockInfo[b].IsDoor)
+                {
+                    BlockShapes.DoorBox(in blockInfo[b], x, y, z, out var boxMin, out var boxMax);
+                    solidHit = BlockShapes.RayHitsBox(origin, dir, boxMin, boxMax, maxDist);
+                }
+
+                if (solidHit)
+                {
+                    hit = (x, y, z);
+                    return true;
+                }
             }
             prev = (x, y, z);
 
