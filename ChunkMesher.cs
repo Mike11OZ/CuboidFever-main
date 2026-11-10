@@ -763,8 +763,8 @@ public static class ChunkMesher
                 wide ? front : axis == 1 ? cap : edge,
                 wide ? 1f : BlockShapes.DoorThickness,
                 swapUv: axis == 1 && !thinInX,
-                // Hinge on the right: mirror the front so the handle stays on the free edge and pairs match
-                mirrorU: wide && self.DoorHingeRight);
+                // Mirror back faces normally, and apply right-hinge correction only when closed
+                mirrorU: wide && ((f % 2 != 0) ^ (self.DoorHingeRight && !self.DoorOpen)));
         }
     }
 

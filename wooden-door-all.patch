@@ -1,0 +1,1751 @@
+From 75f88fa986e1df0496cff83c982aa12fe98ac5c8 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 10 Nov 2026 16:06:22 -0500
+Subject: [PATCH 1/2] Add functional wooden door with block states
+
+- Block states: a block JSON can list "properties" (and per-state "variants");
+  the registry expands it into one ordinary block ID per combination, named
+  e.g. cuboidfever:wooden_door[facing=north,half=lower,open=false]. Chunks,
+  saves, palette and lighting are unchanged; the plain name resolves to the
+  default state. New helpers: GetBaseName, GetDefaultState, GetState, WithState.
+- wooden_door.json: lower/upper halves, 4 facings, open/closed (16 IDs), using
+  the wooden_door_{bottom,top}_{f,s} textures (copied into textures/block).
+- Door is a 3/16 slab (BlockShapes): closed behind the placing player, open
+  swung to their left. Meshed as a box with front/edge textures.
+- Player collision, raycast and target outline use the real slab, not a cube.
+- Right-click toggles both halves; placing makes a 2-tall door facing the
+  player; breaking either half removes both. Door added to the hotbar.
+- Tests for state expansion and door geometry.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01L3RoKZqiDdp3wpP3VHcmMS
+---
+ BlockDefinition.cs                            |  20 +++
+ BlockInteraction.cs                           | 116 ++++++++++++++-
+ BlockRegistry.cs                              |  93 +++++++++++-
+ BlockShapes.cs                                |  91 ++++++++++++
+ BlockStates.cs                                | 132 +++++++++++++++++
+ ChunkMesher.cs                                | 112 ++++++++++++++
+ CuboidFever.Tests/BlockShapesTests.cs         |  99 +++++++++++++
+ CuboidFever.Tests/BlockStatesTests.cs         | 138 ++++++++++++++++++
+ Hotbar.cs                                     |   7 +-
+ Player.cs                                     |  69 ++++++++-
+ World.cs                                      |  15 +-
+ WorldRenderer.cs                              |  12 +-
+ .../textures/block/wooden_door_bottom_f.png   | Bin 0 -> 178 bytes
+ .../textures/block/wooden_door_bottom_s.png   | Bin 0 -> 117 bytes
+ .../textures/block/wooden_door_top_f.png      | Bin 0 -> 219 bytes
+ .../textures/block/wooden_door_top_s.png      | Bin 0 -> 116 bytes
+ data/cuboidfever/block/wooden_door.json       |  36 +++++
+ data/cuboidfever/hotbar.json                  |   1 +
+ 18 files changed, 926 insertions(+), 15 deletions(-)
+ create mode 100644 BlockShapes.cs
+ create mode 100644 BlockStates.cs
+ create mode 100644 CuboidFever.Tests/BlockShapesTests.cs
+ create mode 100644 CuboidFever.Tests/BlockStatesTests.cs
+ create mode 100644 assets/cuboidfever/textures/block/wooden_door_bottom_f.png
+ create mode 100644 assets/cuboidfever/textures/block/wooden_door_bottom_s.png
+ create mode 100644 assets/cuboidfever/textures/block/wooden_door_top_f.png
+ create mode 100644 assets/cuboidfever/textures/block/wooden_door_top_s.png
+ create mode 100644 data/cuboidfever/block/wooden_door.json
+
+diff --git a/BlockDefinition.cs b/BlockDefinition.cs
+index d1275ee..007e693 100644
+--- a/BlockDefinition.cs
++++ b/BlockDefinition.cs
+@@ -35,6 +35,26 @@ public class BlockDefinition
+ 
+     public string Texture { get; set; }
+     public Dictionary<string, string> Textures { get; set; } = new();
++
++    // ---- Block states ----
++    // A block that lists properties (e.g. "open": ["false", "true"]) is expanded when the registry loads into one
++    // runtime block per combination, so every state is an ordinary one-byte block ID. Chunks, saves, lighting and
++    // the palette need no changes. See BlockStates.
++    public Dictionary<string, List<string>> Properties { get; set; } = new();
++
++    // Overrides applied to the states they match, in file order (later entries win). Today that is textures only.
++    public List<BlockVariant> Variants { get; set; } = new();
++
++    // Filled in by BlockStates.Expand for each generated state; empty for blocks without properties.
++    [JsonIgnore] public string BaseName { get; set; }
++    [JsonIgnore] public SortedDictionary<string, string> State { get; set; } = new(StringComparer.Ordinal);
++}
++
++// "when" lists property values (all must match); "textures" replaces those texture keys for the matching states.
++public class BlockVariant
++{
++    public Dictionary<string, string> When { get; set; } = new();
++    public Dictionary<string, string> Textures { get; set; } = new();
+ }
+ 
+ public class EmissionData
+diff --git a/BlockInteraction.cs b/BlockInteraction.cs
+index ab0be23..136b55a 100644
+--- a/BlockInteraction.cs
++++ b/BlockInteraction.cs
+@@ -1,3 +1,5 @@
++using Microsoft.Xna.Framework;
++
+ namespace CuboidFever;
+ 
+ public sealed class BlockInteraction
+@@ -23,6 +25,10 @@ public sealed class BlockInteraction
+     private float _breakCooldown;
+     private float _placeCooldown;
+ 
++    // Set when a right-click opened or closed a door, so holding the button does not go on to place blocks
++    // (or flap the door) until it is released and pressed again.
++    private bool _placeUsedOnDoor;
++
+     public BlockInteraction(World world, Player player, PlayerController controller, Hotbar hotbar,
+                             ActionInput input, ParticleSystem particles, DayNightCycle dayNight, AudioManager audioManager)
+     {
+@@ -63,14 +69,27 @@ public sealed class BlockInteraction
+         bool isPlacing = _input.IsDown(GameAction.PlaceBlock);
+         bool isBreaking = _input.IsDown(GameAction.BreakBlock);
+ 
++        if (!isPlacing) _placeUsedOnDoor = false;
++
+         if (isPlacing)
+         {
+             _breakCooldown = 0f; // Reset break tracking when switching focus to placing
+ 
+-            if (_input.WasPressed(GameAction.PlaceBlock) && HasTarget)
++            if (_placeUsedOnDoor)
+             {
+-                Place();
+-                _placeCooldown = PlaceInitialDelay; // Apply longer initial delay after the first placement
++                // Waiting for the button to be released
++            }
++            else if (_input.WasPressed(GameAction.PlaceBlock) && HasTarget)
++            {
++                if (TryUseTarget())
++                {
++                    _placeUsedOnDoor = true;
++                }
++                else
++                {
++                    Place();
++                    _placeCooldown = PlaceInitialDelay; // Apply longer initial delay after the first placement
++                }
+             }
+             else if (_placeCooldown <= 0 && HasTarget)
+             {
+@@ -106,6 +125,16 @@ public sealed class BlockInteraction
+         byte block = _world.GetBlock(x, y, z);
+         if (block == _airId) return;
+ 
++        var info = BlockRegistry.Instance.Info;
++
++        // A door is two blocks tall: breaking one half takes the other with it
++        if (info[block].IsDoor && TryGetDoorPartner(x, y, z, out int partnerY))
++        {
++            byte partner = _world.GetBlock(x, partnerY, z);
++            _world.SetBlock(x, partnerY, z, _airId);
++            _particles.SpawnBurst(_world, x, partnerY, z, partner, _dayNight.SkyBrightness);
++        }
++
+         _world.SetBlock(x, y, z, _airId);
+         _particles.SpawnBurst(_world, x, y, z, block, _dayNight.SkyBrightness);
+         
+@@ -117,6 +146,17 @@ public sealed class BlockInteraction
+         if (TargetPrev == Target) return;
+ 
+         var (x, y, z) = TargetPrev;
++
++        // The cell must be free: the ray can end in a door's empty space, and a door cannot be replaced
++        byte existing = _world.GetBlock(x, y, z);
++        if (existing != _airId && !BlockRegistry.Instance.Info[existing].IsWater) return;
++
++        if (BlockRegistry.Instance.Info[_hotbar.SelectedId].IsDoor)
++        {
++            PlaceDoor(x, y, z);
++            return;
++        }
++
+         if (_player.Overlaps(x, y, z)) return;
+ 
+         _world.SetBlock(x, y, z, _hotbar.SelectedId);
+@@ -124,6 +164,76 @@ public sealed class BlockInteraction
+         _audioManager?.PlaySound("place");
+     }
+ 
++    // A door fills two cells, the one you aimed at and the one above it, and faces the way the player is looking.
++    private void PlaceDoor(int x, int y, int z)
++    {
++        if (y + 1 >= World.Height) return;
++
++        var registry = BlockRegistry.Instance;
++        var info = registry.Info;
++
++        byte above = _world.GetBlock(x, y + 1, z);
++        if (above != _airId && !info[above].IsWater) return;
++
++        Vector3 look = _controller.Forward;
++        string facing = BlockShapes.FacingNames[BlockShapes.FacingFromDirection(look.X, look.Z)];
++
++        byte door = registry.GetDefaultState(_hotbar.SelectedId);
++        door = registry.WithState(door, "facing", facing);
++        byte lower = registry.WithState(door, "half", "lower");
++        byte upper = registry.WithState(door, "half", "upper");
++
++        // Don't shut the player inside their own door
++        foreach (var (id, cellY) in new[] { (lower, y), (upper, y + 1) })
++        {
++            BlockShapes.DoorBox(in info[id], x, cellY, z, out var min, out var max);
++            if (_player.OverlapsBox(min, max)) return;
++        }
++
++        _world.SetBlock(x, y, z, lower);
++        _world.SetBlock(x, y + 1, z, upper);
++
++        _audioManager?.PlaySound("place");
++    }
++
++    // Right-clicking a door opens or closes it instead of placing a block. Returns true if it did.
++    private bool TryUseTarget()
++    {
++        var (x, y, z) = Target;
++        byte block = _world.GetBlock(x, y, z);
++        var info = BlockRegistry.Instance.Info;
++        if (!info[block].IsDoor) return false;
++
++        var registry = BlockRegistry.Instance;
++        string open = info[block].DoorOpen ? "false" : "true";
++
++        _world.SetBlock(x, y, z, registry.WithState(block, "open", open));
++
++        // Keep the other half in step with this one
++        if (TryGetDoorPartner(x, y, z, out int partnerY))
++        {
++            byte partner = _world.GetBlock(x, partnerY, z);
++            _world.SetBlock(x, partnerY, z, registry.WithState(partner, "open", open));
++        }
++
++        // No dedicated door sounds yet, so reuse the block sounds
++        _audioManager?.PlaySound(open == "true" ? "place" : "break", 0.6f);
++        return true;
++    }
++
++    // The other half of the door at (x, y, z), if it is there and really is the matching half.
++    private bool TryGetDoorPartner(int x, int y, int z, out int partnerY)
++    {
++        var info = BlockRegistry.Instance.Info;
++        var self = info[_world.GetBlock(x, y, z)];
++
++        partnerY = self.DoorUpper ? y - 1 : y + 1;
++        if (partnerY < 0 || partnerY >= World.Height) return false;
++
++        var other = info[_world.GetBlock(x, partnerY, z)];
++        return other.IsDoor && other.DoorUpper != self.DoorUpper && other.DoorFacing == self.DoorFacing;
++    }
++
+     private void Select()
+     {
+         var (x, y, z) = Target;
+diff --git a/BlockRegistry.cs b/BlockRegistry.cs
+index 6eba4cc..87dc890 100644
+--- a/BlockRegistry.cs
++++ b/BlockRegistry.cs
+@@ -19,6 +19,10 @@ public struct BlockInfo
+ 
+     public int FluidLevel;
+ 
++    // Doors: a thin slab whose position comes from the block state (see BlockShapes). DoorFacing is 0..3.
++    public bool IsDoor, DoorOpen, DoorUpper;
++    public byte DoorFacing;
++
+     // Which update rules the block follows when it or a neighbour changes (see BlockTickScheduler)
+     public TickKind Tick;
+ }
+@@ -32,12 +36,16 @@ public sealed class BlockRegistry
+ 
+     public readonly BlockInfo[] Info = new BlockInfo[256];
+     private readonly TextureRegion[] _faceRegions = new TextureRegion[256 * 6];
++    private readonly TextureRegion[] _edgeRegions = new TextureRegion[256];
+ 
+     public float InsetU { get; private set; }
+     public float InsetV { get; private set; }
+ 
+     public TextureRegion FastRegion(byte id, int face) => _faceRegions[id * 6 + face];
+ 
++    // The narrow-edge texture of a door (its "edge" texture key); other blocks just return their face 0 texture.
++    public TextureRegion EdgeRegion(byte id) => _edgeRegions[id];
++
+     private void Bake()
+     {
+         var atlas = TextureAtlas.Instance
+@@ -55,6 +63,21 @@ public sealed class BlockRegistry
+             if (isWater && def.Gravity)
+                 throw new InvalidDataException($"Block '{name}' cannot be both water and gravity-affected.");
+ 
++            bool isDoor = def.RenderType.Equals("door", StringComparison.OrdinalIgnoreCase);
++            int doorFacing = 0;
++            if (isDoor)
++            {
++                if (!def.State.TryGetValue("facing", out string facingName) ||
++                    (doorFacing = BlockShapes.FacingFromName(facingName)) < 0 ||
++                    !def.State.TryGetValue("half", out string half) || (half != "lower" && half != "upper") ||
++                    !def.State.TryGetValue("open", out string open) || (open != "false" && open != "true"))
++                {
++                    throw new InvalidDataException(
++                        $"Block '{name}' is a door, so it needs the properties facing (north/east/south/west), " +
++                        "half (lower/upper) and open (false/true).");
++                }
++            }
++
+             Info[id] = new BlockInfo
+             {
+                 Transparent = def.Transparent,
+@@ -64,6 +87,10 @@ public sealed class BlockRegistry
+                 Emissive = def.Emissive,
+                 Occludes = def.Solid && !def.Transparent && def.RenderType.Equals("cube", StringComparison.OrdinalIgnoreCase),
+                 IsCross = def.RenderType.Equals("cross", StringComparison.OrdinalIgnoreCase), // <-- Added mapping
++                IsDoor = isDoor,
++                DoorFacing = (byte)doorFacing,
++                DoorOpen = isDoor && def.State["open"] == "true",
++                DoorUpper = isDoor && def.State["half"] == "upper",
+                 IsAir = name.Equals("cuboidfever:air", StringComparison.OrdinalIgnoreCase),
+                 IsWater = isWater,
+                 FluidLevel = isWater ? def.FluidLevel : -1,
+@@ -80,6 +107,12 @@ public sealed class BlockRegistry
+             };
+             for (int f = 0; f < 6; f++)
+                 _faceRegions[id * 6 + f] = GetTextureRegion(id, f);
++
++            _edgeRegions[id] = def.Textures != null &&
++                               def.Textures.TryGetValue("edge", out string edge) &&
++                               !string.IsNullOrWhiteSpace(edge)
++                ? TextureAtlas.Instance.GetRegion(edge)
++                : _faceRegions[id * 6];
+         }
+ 
+         BuildWaterTable();
+@@ -131,6 +164,10 @@ public sealed class BlockRegistry
+ 
+     private readonly Dictionary<byte, BlockDefinition> _definitions = new();
+ 
++    // Plain name of a block with states -> its default state, so "cuboidfever:wooden_door" still works
++    private readonly Dictionary<string, byte> _defaultStates =
++        new(StringComparer.OrdinalIgnoreCase);
++
+     private readonly Dictionary<string, HashSet<byte>> _tags =
+         new(StringComparer.OrdinalIgnoreCase);
+ 
+@@ -196,6 +233,17 @@ public sealed class BlockRegistry
+                 ?? throw new InvalidDataException($"Invalid block JSON: {file}"))
+             .ToList();
+ 
++        // Blocks with properties become one definition per state (default state first within each block)
++        var defaultStates = new List<BlockDefinition>();
++        var expanded = new List<BlockDefinition>();
++        foreach (var blockDefinition in definitions)
++        {
++            var states = BlockStates.Expand(blockDefinition);
++            expanded.AddRange(states);
++            if (states[0].BaseName != null) defaultStates.Add(states[0]);
++        }
++        definitions = expanded;
++
+         var air = definitions.SingleOrDefault(d =>
+             d.Name.Equals("cuboidfever:air",
+                 StringComparison.OrdinalIgnoreCase));
+@@ -237,6 +285,9 @@ public sealed class BlockRegistry
+             _definitions.Add(id, definition);
+         }
+ 
++        foreach (var def in defaultStates)
++            _defaultStates[def.BaseName] = _ids[def.Name];
++
+         if (Directory.Exists(tagDir))
+         {
+             foreach (string file in Directory.GetFiles(tagDir, "*.json"))
+@@ -274,7 +325,7 @@ public sealed class BlockRegistry
+     }
+     public byte GetId(string name)
+     {
+-        if (_ids.TryGetValue(name, out byte id))
++        if (TryGetId(name, out byte id))
+             return id;
+ 
+         throw new KeyNotFoundException($"Unknown block: {name}");
+@@ -282,12 +333,50 @@ public sealed class BlockRegistry
+ 
+     public string GetName(byte id) => Get(id).Name;
+ 
++    // ---- Block states ----
++
++    // The block's name without its state: cuboidfever:wooden_door for any door state, same as GetName otherwise.
++    public string GetBaseName(byte id)
++    {
++        var def = Get(id);
++        return def.BaseName ?? def.Name;
++    }
++
++    // The block's default state, e.g. the closed lower north door for any door state; other blocks return themselves.
++    public byte GetDefaultState(byte id)
++    {
++        var def = Get(id);
++        return def.BaseName != null && _defaultStates.TryGetValue(def.BaseName, out byte d) ? d : id;
++    }
++
++    // The value of one property of the block ("open" -> "true"), or null if the block has no such property.
++    public string GetState(byte id, string property) =>
++        Get(id).State.TryGetValue(property, out string value) ? value : null;
++
++    // The block with the same base block and state as 'id' except for one property.
++    // Throws if the property or value does not exist for the block.
++    public byte WithState(byte id, string property, string value)
++    {
++        var def = Get(id);
++        if (def.BaseName == null || !def.State.ContainsKey(property))
++            throw new ArgumentException($"Block '{def.Name}' has no property '{property}'.", nameof(property));
++
++        var state = new Dictionary<string, string>(def.State) { [property] = value };
++        string name = BlockStates.StateName(def.BaseName, state);
++
++        return _ids.TryGetValue(name, out byte result)
++            ? result
++            : throw new ArgumentException($"Block '{def.BaseName}' has no state '{property}={value}'.", nameof(value));
++    }
++
+     // How many blocks are defined. Runtime IDs 0 .. Count - 1 are in use.
+     public int Count => _definitions.Count;
+ 
+     // Like GetId, but returns false instead of throwing. The save system uses it to spot blocks that a
+     // saved world mentions and this build no longer has.
+-    public bool TryGetId(string name, out byte id) => _ids.TryGetValue(name, out id);
++    // A plain name that belongs to a block with states gives its default state.
++    public bool TryGetId(string name, out byte id) =>
++        _ids.TryGetValue(name, out id) || _defaultStates.TryGetValue(name, out id);
+ 
+     public BlockDefinition Get(byte id)
+     {
+diff --git a/BlockShapes.cs b/BlockShapes.cs
+new file mode 100644
+index 0000000..bdc829a
+--- /dev/null
++++ b/BlockShapes.cs
+@@ -0,0 +1,91 @@
++using System;
++using Microsoft.Xna.Framework;
++
++namespace CuboidFever;
++
++// Geometry for blocks that are not a full cube. Today that is only the door: a 3/16 thick slab that fills the
++// block's height and one of its edges. Closed it lies along the edge behind the player who placed it; open it has
++// swung round to the player's left-hand edge, so it is never in the way of the doorway.
++//
++// Facing is stored as 0..3 in BlockInfo, clockwise seen from above: north (-Z), east (+X), south (+Z), west (-X).
++// A door's "facing" is the way the player was looking when they placed it.
++public static class BlockShapes
++{
++    public const float DoorThickness = 3f / 16f;
++
++    public static readonly string[] FacingNames = { "north", "east", "south", "west" };
++    private static readonly int[] FacingDX = { 0, 1, 0, -1 };
++    private static readonly int[] FacingDZ = { -1, 0, 1, 0 };
++
++    public static int FacingFromName(string name) => Array.IndexOf(FacingNames, name);
++
++    // The facing closest to a horizontal look direction.
++    public static int FacingFromDirection(float dx, float dz)
++    {
++        if (MathF.Abs(dx) > MathF.Abs(dz)) return dx > 0 ? 1 : 3;
++        return dz > 0 ? 2 : 0;
++    }
++
++    // Box of the door block in block-local coordinates (0..1 on every axis).
++    public static void DoorBox(int facing, bool open, out Vector3 min, out Vector3 max)
++    {
++        int fx = FacingDX[facing], fz = FacingDZ[facing];
++
++        // Which edge the slab hugs: behind the player when closed, to the player's left when open.
++        int ex, ez;
++        if (open) { ex = fz; ez = -fx; }
++        else      { ex = -fx; ez = -fz; }
++
++        float x0 = 0f, x1 = 1f, z0 = 0f, z1 = 1f;
++
++        if (ex > 0) x0 = 1f - DoorThickness;
++        else if (ex < 0) x1 = DoorThickness;
++
++        if (ez > 0) z0 = 1f - DoorThickness;
++        else if (ez < 0) z1 = DoorThickness;
++
++        min = new Vector3(x0, 0f, z0);
++        max = new Vector3(x1, 1f, z1);
++    }
++
++    public static void DoorBox(in BlockInfo info, out Vector3 min, out Vector3 max) =>
++        DoorBox(info.DoorFacing, info.DoorOpen, out min, out max);
++
++    // The same box in world coordinates for the door at block (x, y, z).
++    public static void DoorBox(in BlockInfo info, int x, int y, int z, out Vector3 min, out Vector3 max)
++    {
++        DoorBox(info.DoorFacing, info.DoorOpen, out min, out max);
++        var origin = new Vector3(x, y, z);
++        min += origin;
++        max += origin;
++    }
++
++    // Ray against an axis-aligned box (slab method). True if the ray enters the box within maxDist.
++    public static bool RayHitsBox(Vector3 origin, Vector3 dir, Vector3 min, Vector3 max, float maxDist)
++    {
++        float tNear = 0f, tFar = maxDist;
++
++        for (int axis = 0; axis < 3; axis++)
++        {
++            float o = axis == 0 ? origin.X : axis == 1 ? origin.Y : origin.Z;
++            float d = axis == 0 ? dir.X : axis == 1 ? dir.Y : dir.Z;
++            float lo = axis == 0 ? min.X : axis == 1 ? min.Y : min.Z;
++            float hi = axis == 0 ? max.X : axis == 1 ? max.Y : max.Z;
++
++            if (MathF.Abs(d) < 1e-8f)
++            {
++                if (o < lo || o > hi) return false;
++                continue;
++            }
++
++            float t0 = (lo - o) / d, t1 = (hi - o) / d;
++            if (t0 > t1) (t0, t1) = (t1, t0);
++
++            tNear = MathF.Max(tNear, t0);
++            tFar = MathF.Min(tFar, t1);
++            if (tNear > tFar) return false;
++        }
++
++        return true;
++    }
++}
+diff --git a/BlockStates.cs b/BlockStates.cs
+new file mode 100644
+index 0000000..15be610
+--- /dev/null
++++ b/BlockStates.cs
+@@ -0,0 +1,132 @@
++using System;
++using System.Collections.Generic;
++using System.IO;
++using System.Linq;
++
++namespace CuboidFever;
++
++// Block states, after Minecraft's blockstates, but flattened: a block with properties becomes one block ID per
++// combination of property values, named like
++//
++//   cuboidfever:wooden_door[facing=north,half=lower,open=false]
++//
++// (properties sorted by name). Because each state is a plain block ID, nothing downstream has to know about
++// states: the palette saves the full state name, lighting and meshing read the baked BlockInfo, and changing a
++// state is just SetBlock with a different ID (BlockRegistry.WithState).
++//
++// The plain name, cuboidfever:wooden_door, stays usable and means the default state: the first value of every
++// property as listed in the JSON.
++public static class BlockStates
++{
++    // How many IDs one block may expand to. The world holds 256 IDs in total, so this is a sanity check.
++    public const int MaxStatesPerBlock = 64;
++
++    public static string StateName(string baseName, IReadOnlyDictionary<string, string> state)
++    {
++        if (state.Count == 0) return baseName;
++
++        // Sorted, so the same state always gets the same name whatever order the caller listed it in
++        var parts = state.OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => $"{p.Key}={p.Value}");
++        return $"{baseName}[{string.Join(",", parts)}]";
++    }
++
++    // Returns the block's states: the block itself if it has no properties, otherwise one copy per combination,
++    // default state first. Throws InvalidDataException for definitions that make no sense.
++    public static List<BlockDefinition> Expand(BlockDefinition def)
++    {
++        if (def.Properties == null || def.Properties.Count == 0)
++        {
++            if (def.Variants is { Count: > 0 })
++                throw new InvalidDataException($"Block '{def.Name}' has variants but no properties.");
++            return new List<BlockDefinition> { def };
++        }
++
++        var names = def.Properties.Keys.OrderBy(k => k, StringComparer.Ordinal).ToList();
++
++        long total = 1;
++        foreach (string name in names)
++        {
++            var values = def.Properties[name];
++            if (string.IsNullOrWhiteSpace(name) || name.IndexOfAny(new[] { '[', ']', ',', '=' }) >= 0)
++                throw new InvalidDataException($"Block '{def.Name}' has an invalid property name '{name}'.");
++            if (values == null || values.Count == 0)
++                throw new InvalidDataException($"Block '{def.Name}' property '{name}' has no values.");
++            if (values.Any(v => string.IsNullOrWhiteSpace(v) || v.IndexOfAny(new[] { '[', ']', ',', '=' }) >= 0))
++                throw new InvalidDataException($"Block '{def.Name}' property '{name}' has an invalid value.");
++            if (values.Distinct(StringComparer.Ordinal).Count() != values.Count)
++                throw new InvalidDataException($"Block '{def.Name}' property '{name}' lists a value twice.");
++
++            total *= values.Count;
++            if (total > MaxStatesPerBlock)
++                throw new InvalidDataException(
++                    $"Block '{def.Name}' has more than {MaxStatesPerBlock} states; the world only has 256 block IDs.");
++        }
++
++        foreach (var variant in def.Variants ?? new())
++        {
++            foreach (var (prop, value) in variant.When ?? new())
++            {
++                if (!def.Properties.TryGetValue(prop, out var allowed) || !allowed.Contains(value))
++                    throw new InvalidDataException(
++                        $"Block '{def.Name}' has a variant for unknown state '{prop}={value}'.");
++            }
++        }
++
++        var result = new List<BlockDefinition>((int)total);
++
++        // Odometer over the properties; the last property changes fastest. The first combination is the default.
++        var index = new int[names.Count];
++        while (true)
++        {
++            var state = new SortedDictionary<string, string>(StringComparer.Ordinal);
++            for (int i = 0; i < names.Count; i++)
++                state[names[i]] = def.Properties[names[i]][index[i]];
++
++            result.Add(MakeState(def, state));
++
++            int p = names.Count - 1;
++            while (p >= 0 && ++index[p] == def.Properties[names[p]].Count)
++                index[p--] = 0;
++            if (p < 0) break;
++        }
++
++        return result;
++    }
++
++    private static BlockDefinition MakeState(BlockDefinition def, SortedDictionary<string, string> state)
++    {
++        var textures = new Dictionary<string, string>(def.Textures ?? new());
++
++        foreach (var variant in def.Variants ?? new())
++        {
++            bool matches = (variant.When ?? new()).All(w => state[w.Key] == w.Value);
++            if (!matches) continue;
++
++            foreach (var (key, value) in variant.Textures ?? new())
++                textures[key] = value;
++        }
++
++        return new BlockDefinition
++        {
++            Name = StateName(def.Name, state),
++            BaseName = def.Name,
++            State = state,
++            Solid = def.Solid,
++            Transparent = def.Transparent,
++            Replaceable = def.Replaceable,
++            LightAttenuation = def.LightAttenuation,
++            Emissive = def.Emissive,
++            FullBlock = def.FullBlock,
++            RenderLayer = def.RenderLayer,
++            RenderType = def.RenderType,
++            Fluid = def.Fluid,
++            FluidLevel = def.FluidLevel,
++            Gravity = def.Gravity,
++            Emission = def.Emission,
++            Tint = def.Tint,
++            BiomeTint = def.BiomeTint,
++            Texture = def.Texture,
++            Textures = textures,
++        };
++    }
++}
+diff --git a/ChunkMesher.cs b/ChunkMesher.cs
+index 45c36b4..fc6c573 100644
+--- a/ChunkMesher.cs
++++ b/ChunkMesher.cs
+@@ -240,6 +240,69 @@ public static class ChunkMesher
+             }
+         }
+ 
++        // One face of a box that sits inside a block's cell (doors). 'bmin'/'bmax' are the box corners in block-local
++        // coordinates. The texture is stretched over the whole face, except that only the leftmost 'uSpan' of its
++        // width is used (the door's 3-pixel edge strip), and 'swapUv' turns the mapping a quarter so a strip
++        // lines up with the long way of a top or bottom face.
++        public void AddBoxFace(
++            int f,
++            Vector3 pos,
++            Vector3 bmin,
++            Vector3 bmax,
++            Color color,
++            Color skyColor,
++            TextureRegion region,
++            float uSpan,
++            bool swapUv)
++        {
++            int start = V.Count;
++
++            if (_trackWaterData)
++            {
++                for (int c = 0; c < 4; c++)
++                {
++                    F!.Add((byte)f);
++                    W!.Add(0f);
++                }
++            }
++
++            float widthU = (region.U1 - region.U0) * uSpan;
++            float heightV = region.V1 - region.V0;
++            Vector2[] uvs = f == 3 ? BottomUV : FaceUV;
++            Vector3 size = bmax - bmin;
++
++            float r = color.R / 255f, g = color.G / 255f;
++            float b = color.B / 255f, a = color.A / 255f;
++            float sr = skyColor.R / 255f, sg = skyColor.G / 255f;
++            float sb = skyColor.B / 255f;
++
++            for (int c = 0; c < 4; c++)
++            {
++                Vector3 corner = FaceCorners[f][c];
++                Vector2 uvc = swapUv ? new Vector2(uvs[c].Y, uvs[c].X) : uvs[c];
++
++                var uv = new Vector2(
++                    region.U0 + _insetU + uvc.X * (widthU - 2f * _insetU),
++                    region.V0 + _insetV + uvc.Y * (heightV - 2f * _insetV));
++
++                var vertexPos = pos + bmin + new Vector3(corner.X * size.X, corner.Y * size.Y, corner.Z * size.Z);
++
++                V.Add(new VertexPositionColorTextureSky(
++                    vertexPos,
++                    new Color(r, g, b, a),
++                    uv,
++                    new Color(sr, sg, sb, 1f)));
++            }
++
++            I.Add(start + 1);
++            I.Add(start + 2);
++            I.Add(start + 3);
++
++            I.Add(start + 1);
++            I.Add(start + 3);
++            I.Add(start);
++        }
++
+         public void AddCross(
+             Vector3 pos,
+             Color color,
+@@ -545,6 +608,12 @@ public static class ChunkMesher
+                 continue;
+             }
+ 
++            if (self.IsDoor)
++            {
++                MeshDoor(b, in self, id, i, pos, tintMul, registry);
++                continue;
++            }
++
+             bool cornersReady = false;
+ 
+             for (int f = 0; f < 6; f++)
+@@ -651,6 +720,49 @@ public static class ChunkMesher
+         return result;
+     }
+ 
++    // A door is a thin slab (BlockShapes.DoorBox). All six faces are always drawn: the slab never hides a neighbour,
++    // and you can see both sides of it. The wide faces use the block's main texture and the four narrow ones its
++    // "edge" texture; both come from the state, so the lower and upper halves can look different.
++    private static void MeshDoor(
++        Buffers b,
++        in BlockInfo self,
++        byte id,
++        int i,
++        Vector3 pos,
++        Vector3 tintMul,
++        BlockRegistry registry)
++    {
++        BlockShapes.DoorBox(in self, out Vector3 bmin, out Vector3 bmax);
++
++        bool thinInX = bmax.X - bmin.X < 0.5f;
++        int thinAxis = thinInX ? 0 : 2;
++
++        TextureRegion front = registry.FastRegion(id, 0);
++        TextureRegion edge = registry.EdgeRegion(id);
++
++        for (int f = 0; f < 6; f++)
++        {
++            int axis = f / 2;
++            bool wide = axis == thinAxis;
++
++            // The brighter of the door's own cell and the cell the face looks into
++            int lightSample = BrighterCell(b.Light, i, i + Offsets[f]);
++
++            LightColors(in self, f, lightSample, b.Light, tintMul, out var color, out var skyColor);
++
++            b.Solid.AddBoxFace(
++                f,
++                pos,
++                bmin,
++                bmax,
++                color,
++                skyColor,
++                wide ? front : edge,
++                wide ? 1f : BlockShapes.DoorThickness,
++                swapUv: axis == 1 && !thinInX);
++        }
++    }
++
+     private static void FillTints(
+         ClimateMap climate,
+         int ox,
+diff --git a/CuboidFever.Tests/BlockShapesTests.cs b/CuboidFever.Tests/BlockShapesTests.cs
+new file mode 100644
+index 0000000..4bf3608
+--- /dev/null
++++ b/CuboidFever.Tests/BlockShapesTests.cs
+@@ -0,0 +1,99 @@
++using CuboidFever;
++using Microsoft.Xna.Framework;
++using Xunit;
++
++namespace CuboidFever.Tests;
++
++public class BlockShapesTests
++{
++    private const float T = BlockShapes.DoorThickness;
++
++    private static void AssertBox(Vector3 min, Vector3 max, float x0, float x1, float z0, float z1)
++    {
++        Assert.Equal(x0, min.X, 4);
++        Assert.Equal(0f, min.Y, 4);
++        Assert.Equal(z0, min.Z, 4);
++        Assert.Equal(x1, max.X, 4);
++        Assert.Equal(1f, max.Y, 4);
++        Assert.Equal(z1, max.Z, 4);
++    }
++
++    [Fact]
++    public void FacingFollowsTheLookDirection()
++    {
++        Assert.Equal(0, BlockShapes.FacingFromDirection(0.1f, -1f));  // north is -Z
++        Assert.Equal(1, BlockShapes.FacingFromDirection(1f, 0.2f));   // east is +X
++        Assert.Equal(2, BlockShapes.FacingFromDirection(-0.3f, 1f));  // south is +Z
++        Assert.Equal(3, BlockShapes.FacingFromDirection(-1f, -0.2f)); // west is -X
++    }
++
++    [Fact]
++    public void ClosedDoorLiesOnTheEdgeBehindThePlayer()
++    {
++        BlockShapes.DoorBox(0, false, out var min, out var max); // looking north, so the door is on the south edge
++        AssertBox(min, max, 0f, 1f, 1f - T, 1f);
++
++        BlockShapes.DoorBox(1, false, out min, out max);          // looking east: west edge
++        AssertBox(min, max, 0f, T, 0f, 1f);
++
++        BlockShapes.DoorBox(2, false, out min, out max);          // looking south: north edge
++        AssertBox(min, max, 0f, 1f, 0f, T);
++
++        BlockShapes.DoorBox(3, false, out min, out max);          // looking west: east edge
++        AssertBox(min, max, 1f - T, 1f, 0f, 1f);
++    }
++
++    [Fact]
++    public void OpenDoorSwingsToThePlayersLeft()
++    {
++        BlockShapes.DoorBox(0, true, out var min, out var max);   // looking north, left is west
++        AssertBox(min, max, 0f, T, 0f, 1f);
++
++        BlockShapes.DoorBox(1, true, out min, out max);           // looking east, left is north
++        AssertBox(min, max, 0f, 1f, 0f, T);
++
++        BlockShapes.DoorBox(2, true, out min, out max);           // looking south, left is east
++        AssertBox(min, max, 1f - T, 1f, 0f, 1f);
++
++        BlockShapes.DoorBox(3, true, out min, out max);           // looking west, left is south
++        AssertBox(min, max, 0f, 1f, 1f - T, 1f);
++    }
++
++    [Fact]
++    public void WorldBoxIsTheLocalBoxMovedToTheBlock()
++    {
++        var info = new BlockInfo { IsDoor = true, DoorFacing = 0, DoorOpen = false };
++
++        BlockShapes.DoorBox(in info, 10, 64, -3, out var min, out var max);
++
++        Assert.Equal(10f, min.X, 4);
++        Assert.Equal(64f, min.Y, 4);
++        Assert.Equal(-3f + 1f - T, min.Z, 4);
++        Assert.Equal(11f, max.X, 4);
++        Assert.Equal(65f, max.Y, 4);
++        Assert.Equal(-2f, max.Z, 4);
++    }
++
++    [Fact]
++    public void RayHitsTheSlabButPassesThroughTheGap()
++    {
++        // Closed door facing north: slab at z in [13/16, 1] of block (0, 0, 0)
++        BlockShapes.DoorBox(0, false, out var min, out var max);
++
++        Assert.True(BlockShapes.RayHitsBox(new Vector3(0.5f, 0.5f, 3f), new Vector3(0, 0, -1), min, max, 5f));
++        Assert.False(BlockShapes.RayHitsBox(new Vector3(0.5f, 0.5f, 3f), new Vector3(0, 0, -1), min, max, 1.5f)); // too short
++        Assert.False(BlockShapes.RayHitsBox(new Vector3(0.5f, 0.5f, -3f), new Vector3(0, 0, -1), min, max, 5f)); // pointing away
++        Assert.False(BlockShapes.RayHitsBox(new Vector3(0.5f, 0.5f, 0.5f), new Vector3(1, 0, 0), min, max, 5f)); // runs alongside it
++    }
++
++    [Fact]
++    public void RayParallelToAnAxisIsHandled()
++    {
++        BlockShapes.DoorBox(0, false, out var min, out var max);
++
++        // Travelling along the slab's wide face, inside its thickness
++        Assert.True(BlockShapes.RayHitsBox(new Vector3(-2f, 0.5f, 0.95f), new Vector3(1, 0, 0), min, max, 5f));
++        // Same direction, but outside the thickness
++        Assert.False(BlockShapes.RayHitsBox(new Vector3(-2f, 0.5f, 0.5f), new Vector3(1, 0, 0), min, max, 5f));
++    }
++}
+diff --git a/CuboidFever.Tests/BlockStatesTests.cs b/CuboidFever.Tests/BlockStatesTests.cs
+new file mode 100644
+index 0000000..0b37fb6
+--- /dev/null
++++ b/CuboidFever.Tests/BlockStatesTests.cs
+@@ -0,0 +1,138 @@
++using System.Collections.Generic;
++using System.IO;
++using System.Linq;
++using CuboidFever;
++using Xunit;
++
++namespace CuboidFever.Tests;
++
++public class BlockStatesTests
++{
++    private static BlockDefinition Door() => new()
++    {
++        Name = "test:door",
++        Textures = new() { ["all"] = "test:plain" },
++        Properties = new()
++        {
++            ["facing"] = new() { "north", "east", "south", "west" },
++            ["half"] = new() { "lower", "upper" },
++            ["open"] = new() { "false", "true" },
++        },
++        Variants = new()
++        {
++            new() { When = new() { ["half"] = "lower" }, Textures = new() { ["all"] = "test:bottom", ["edge"] = "test:bottom_s" } },
++            new() { When = new() { ["half"] = "upper" }, Textures = new() { ["all"] = "test:top" } },
++        },
++    };
++
++    [Fact]
++    public void BlockWithoutProperties_IsReturnedUnchanged()
++    {
++        var stone = new BlockDefinition { Name = "test:stone" };
++
++        var states = BlockStates.Expand(stone);
++
++        Assert.Single(states);
++        Assert.Same(stone, states[0]);
++        Assert.Null(states[0].BaseName);
++    }
++
++    [Fact]
++    public void EveryCombinationBecomesABlock()
++    {
++        var states = BlockStates.Expand(Door());
++
++        Assert.Equal(16, states.Count);
++        Assert.Equal(16, states.Select(s => s.Name).Distinct().Count());
++        Assert.All(states, s => Assert.Equal("test:door", s.BaseName));
++    }
++
++    [Fact]
++    public void FirstStateIsTheDefault()
++    {
++        var first = BlockStates.Expand(Door())[0];
++
++        Assert.Equal("test:door[facing=north,half=lower,open=false]", first.Name);
++    }
++
++    [Fact]
++    public void NamesListPropertiesInSortedOrder()
++    {
++        var state = new Dictionary<string, string> { ["open"] = "true", ["facing"] = "east", ["half"] = "upper" };
++
++        Assert.Equal("test:door[facing=east,half=upper,open=true]", BlockStates.StateName("test:door", state));
++        Assert.Equal("test:stone", BlockStates.StateName("test:stone", new Dictionary<string, string>()));
++    }
++
++    [Fact]
++    public void VariantsOverrideTexturesOnlyForMatchingStates()
++    {
++        var states = BlockStates.Expand(Door());
++
++        var lower = states.First(s => s.State["half"] == "lower");
++        var upper = states.First(s => s.State["half"] == "upper");
++
++        Assert.Equal("test:bottom", lower.Textures["all"]);
++        Assert.Equal("test:bottom_s", lower.Textures["edge"]);
++        Assert.Equal("test:top", upper.Textures["all"]);
++        Assert.False(upper.Textures.ContainsKey("edge"));
++    }
++
++    [Fact]
++    public void ExpandingDoesNotChangeTheOriginal()
++    {
++        var door = Door();
++
++        BlockStates.Expand(door);
++
++        Assert.Equal("test:plain", door.Textures["all"]);
++        Assert.Equal(3, door.Properties.Count);
++    }
++
++    [Fact]
++    public void VariantForAnUnknownStateIsRejected()
++    {
++        var door = Door();
++        door.Variants.Add(new() { When = new() { ["half"] = "middle" } });
++
++        Assert.Throws<InvalidDataException>(() => BlockStates.Expand(door));
++    }
++
++    [Fact]
++    public void VariantsWithoutPropertiesAreRejected()
++    {
++        var block = new BlockDefinition { Name = "test:x", Variants = new() { new() } };
++
++        Assert.Throws<InvalidDataException>(() => BlockStates.Expand(block));
++    }
++
++    [Fact]
++    public void BadPropertiesAreRejected()
++    {
++        var noValues = new BlockDefinition { Name = "a", Properties = new() { ["p"] = new() } };
++        var repeated = new BlockDefinition { Name = "b", Properties = new() { ["p"] = new() { "x", "x" } } };
++        var badName = new BlockDefinition { Name = "c", Properties = new() { ["p=q"] = new() { "x" } } };
++        var badValue = new BlockDefinition { Name = "d", Properties = new() { ["p"] = new() { "x,y" } } };
++
++        Assert.Throws<InvalidDataException>(() => BlockStates.Expand(noValues));
++        Assert.Throws<InvalidDataException>(() => BlockStates.Expand(repeated));
++        Assert.Throws<InvalidDataException>(() => BlockStates.Expand(badName));
++        Assert.Throws<InvalidDataException>(() => BlockStates.Expand(badValue));
++    }
++
++    [Fact]
++    public void TooManyStatesAreRejected()
++    {
++        var many = new BlockDefinition
++        {
++            Name = "test:many",
++            Properties = new()
++            {
++                ["a"] = Enumerable.Range(0, 9).Select(i => i.ToString()).ToList(),
++                ["b"] = Enumerable.Range(0, 9).Select(i => i.ToString()).ToList(),
++            },
++        };
++
++        Assert.Throws<InvalidDataException>(() => BlockStates.Expand(many));
++    }
++}
+diff --git a/Hotbar.cs b/Hotbar.cs
+index 1356f3c..33cacdf 100644
+--- a/Hotbar.cs
++++ b/Hotbar.cs
+@@ -9,13 +9,15 @@ public sealed class Hotbar
+     private readonly byte[] _ids;
+     private readonly string[] _names;
+     private readonly ActionInput _input;
++    private readonly BlockRegistry _blocks;
+ 
+     public Hotbar(BlockRegistry blocks, ActionInput input)
+     {
+         _input = input;
++        _blocks = blocks;
+         _ids = blocks.HotbarIds;
+         _names = _ids
+-            .Select(id => blocks.GetName(id)
++            .Select(id => blocks.GetBaseName(id)
+                 .Split(':').Last()
+                 .Replace('_', ' '))
+             .ToArray();
+@@ -30,6 +32,9 @@ public sealed class Hotbar
+ 
+     public bool TrySelectBlock(byte blockId)
+     {
++        // Every state of a block (an open door facing east, say) picks the hotbar slot of its default state
++        blockId = _blocks.GetDefaultState(blockId);
++
+         for (int i = 0; i < _ids.Length; i++)
+         {
+             if (_ids[i] == blockId)
+diff --git a/Player.cs b/Player.cs
+index 7da0ba9..4004af7 100644
+--- a/Player.cs
++++ b/Player.cs
+@@ -91,21 +91,82 @@ public class Player
+             && Position.Z + hw > z && Position.Z - hw < z + 1;
+     }
+ 
++    // True if the player's box overlaps the box (min..max) given in world coordinates. Used to stop you placing
++    // a door on top of yourself; unlike Overlaps(x, y, z) it can test a box smaller than a block.
++    public bool OverlapsBox(Vector3 min, Vector3 max)
++    {
++        float hw = Width / 2;
++        return Position.X + hw > min.X && Position.X - hw < max.X
++            && Position.Y + Height > min.Y && Position.Y < max.Y
++            && Position.Z + hw > min.Z && Position.Z - hw < max.Z;
++    }
++
+     private bool Collides(World world)
+     {
+         float hw = Width / 2;
+         int x0 = (int)MathF.Floor(Position.X - hw), x1 = (int)MathF.Floor(Position.X + hw);
+         int y0 = (int)MathF.Floor(Position.Y),      y1 = (int)MathF.Floor(Position.Y + Height);
+         int z0 = (int)MathF.Floor(Position.Z - hw), z1 = (int)MathF.Floor(Position.Z + hw);
++        var info = BlockRegistry.Instance.Info;
+ 
+         for (int x = x0; x <= x1; x++)
+         for (int y = y0; y <= y1; y++)
+         for (int z = z0; z <= z1; z++)
+-            if (world.IsSolid(x, y, z)) return true;
++        {
++            byte id = world.GetBlock(x, y, z);
++            if (!info[id].Solid) continue;
++
++            // A door only fills part of its block, so only count it when the player touches the slab itself
++            if (info[id].IsDoor)
++            {
++                BlockShapes.DoorBox(in info[id], x, y, z, out var min, out var max);
++                if (!OverlapsBox(min, max)) continue;
++            }
++
++            return true;
++        }
+ 
+         return false;
+     }
+ 
++    // After a move along 'axis' ran into something, finds where the player should stop: just short of the nearest
++    // face of whatever they overlap (moving up the axis), or just past the farthest one (moving down it). A normal
++    // block's faces are on whole numbers; a door's are not.
++    private float ContactLimit(World world, int axis, bool positive)
++    {
++        float hw = Width / 2;
++        int x0 = (int)MathF.Floor(Position.X - hw), x1 = (int)MathF.Floor(Position.X + hw);
++        int y0 = (int)MathF.Floor(Position.Y),      y1 = (int)MathF.Floor(Position.Y + Height);
++        int z0 = (int)MathF.Floor(Position.Z - hw), z1 = (int)MathF.Floor(Position.Z + hw);
++        var info = BlockRegistry.Instance.Info;
++
++        float limit = positive ? float.PositiveInfinity : float.NegativeInfinity;
++
++        for (int x = x0; x <= x1; x++)
++        for (int y = y0; y <= y1; y++)
++        for (int z = z0; z <= z1; z++)
++        {
++            byte id = world.GetBlock(x, y, z);
++            if (!info[id].Solid) continue;
++
++            Vector3 min = new(x, y, z), max = new(x + 1, y + 1, z + 1);
++
++            if (info[id].IsDoor)
++            {
++                BlockShapes.DoorBox(in info[id], x, y, z, out min, out max);
++                if (!OverlapsBox(min, max)) continue;
++            }
++
++            float face = positive
++                ? (axis == 0 ? min.X : axis == 1 ? min.Y : min.Z)
++                : (axis == 0 ? max.X : axis == 1 ? max.Y : max.Z);
++
++            limit = positive ? MathF.Min(limit, face) : MathF.Max(limit, face);
++        }
++
++        return limit;
++    }
++
+     private float Get(int a) => a == 0 ? Position.X : a == 1 ? Position.Y : Position.Z;
+ 
+     private void Set(int a, float v)
+@@ -134,13 +195,11 @@ public class Player
+ 
+             if (d > 0)
+             {
+-                int block = (int)MathF.Floor(Get(axis) + upper);
+-                Set(axis, block - upper - Eps);
++                Set(axis, ContactLimit(world, axis, positive: true) - upper - Eps);
+             }
+             else
+             {
+-                int block = (int)MathF.Floor(Get(axis) - lower);
+-                Set(axis, block + 1 + lower + Eps);
++                Set(axis, ContactLimit(world, axis, positive: false) + lower + Eps);
+                 if (axis == 1) OnGround = true;
+             }
+ 
+diff --git a/World.cs b/World.cs
+index d55b709..7039be0 100644
+--- a/World.cs
++++ b/World.cs
+@@ -610,8 +610,19 @@ public class World : IDisposable
+             byte b = GetBlock(x, y, z);
+             if (b != _airId && !blockInfo[b].IsWater)
+             {
+-                hit = (x, y, z);
+-                return true;
++                // A door fills only part of its block: a ray through the empty part carries on
++                bool solidHit = true;
++                if (blockInfo[b].IsDoor)
++                {
++                    BlockShapes.DoorBox(in blockInfo[b], x, y, z, out var boxMin, out var boxMax);
++                    solidHit = BlockShapes.RayHitsBox(origin, dir, boxMin, boxMax, maxDist);
++                }
++
++                if (solidHit)
++                {
++                    hit = (x, y, z);
++                    return true;
++                }
+             }
+             prev = (x, y, z);
+ 
+diff --git a/WorldRenderer.cs b/WorldRenderer.cs
+index f918a38..e7e47ef 100644
+--- a/WorldRenderer.cs
++++ b/WorldRenderer.cs
+@@ -145,8 +145,16 @@ public sealed class WorldRenderer
+     // Black wireframe box around the block being looked at.
+     private void DrawTargetOutline((int x, int y, int z) target)
+     {
+-        var min = new Vector3(target.x, target.y, target.z) - new Vector3(0.002f);
+-        var max = min + new Vector3(1.004f);
++        var min = new Vector3(target.x, target.y, target.z);
++        var max = min + Vector3.One;
++
++        // A door is outlined around its slab, not its whole block
++        var targetInfo = BlockRegistry.Instance.Info[_world.GetBlock(target.x, target.y, target.z)];
++        if (targetInfo.IsDoor)
++            BlockShapes.DoorBox(in targetInfo, target.x, target.y, target.z, out min, out max);
++
++        min -= new Vector3(0.002f);
++        max += new Vector3(0.002f);
+ 
+         var p = new Vector3[8];
+         for (int i = 0; i < 8; i++)
+diff --git a/assets/cuboidfever/textures/block/wooden_door_bottom_f.png b/assets/cuboidfever/textures/block/wooden_door_bottom_f.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..28e821a7c55a35b52afbb9713aba0b81a813c518
+GIT binary patch
+literal 178
+zcmV;j08RgiP)<h;3K|Lk000e1NJLTq000mG000mO1^@s6AM^iV00001b5ch_0Itp)
+z=>Px#Y)M2xR5*=e?1{GfZ>1%{aO~O(1{e(kR$3Aa3=9l#G5hRhxZLmkQyGq3d%?iO
+zKms^8wU*)c{;4QpBpHBg5Jd)1?1I5%01LVREb0h};WPkWI>2Vwz=y#g3q<6=BH0D_
+gY$0d>IX1%p0REdKxt{l9b^rhX07*qoM6N<$g0K-kpa1{>
+
+literal 0
+HcmV?d00001
+
+diff --git a/assets/cuboidfever/textures/block/wooden_door_bottom_s.png b/assets/cuboidfever/textures/block/wooden_door_bottom_s.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..daa599e062b019d0b6ca2819c9ab5c38778a02b9
+GIT binary patch
+literal 117
+zcmeAS@N?(olHy`uVBq!ia0y~yU=RRd4mJh`2Kmqb6B!s77>k44ofy`glX=O&z@YEx
+z;uvDloBXD8+wc6Pss{_++~RJVw6tA9(u2ikNtT3Z!j*<V=8Vh(8?*IKm@zQ$t>s)I
+U<(*m2z`(%Z>FVdQ&MBb@02Fc~82|tP
+
+literal 0
+HcmV?d00001
+
+diff --git a/assets/cuboidfever/textures/block/wooden_door_top_f.png b/assets/cuboidfever/textures/block/wooden_door_top_f.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..c9b1de70dfa5bacd34d5bb30d4c54812cacef15f
+GIT binary patch
+literal 219
+zcmV<103`p3P)<h;3K|Lk000e1NJLTq000mG000mO1^@s6AM^iV00001b5ch_0Itp)
+z=>Px#l}SWFR5*=e?1{Gf&p-iSVPIfju+owsOY^a7FCYfMIHUlWr7YM4iLn_5SkNV{
+zs#h_>6}E=`M;3eb{KNkT^U_e%GZE|LXU{+Umy#4<L>DL80Bo8`G5{CAX~47RABajH
+zSPj7DUt9)aH2|AtioyVwW~>Gf>vtHyNJtOnrNI*r450Jz8i1TkVM!aC7z|LH4gg&-
+VJ9N4ssQUl_002ovPDHLkV1l0`QMCX7
+
+literal 0
+HcmV?d00001
+
+diff --git a/assets/cuboidfever/textures/block/wooden_door_top_s.png b/assets/cuboidfever/textures/block/wooden_door_top_s.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..bdbcae95597498e76f508fd009d1219b8b49a3bf
+GIT binary patch
+literal 116
+zcmeAS@N?(olHy`uVBq!ia0y~yU=RRd4mJh`2Kmqb6B!s77>k44ofy`glX=O&z@X>p
+z;uvDloBXD8+wb!Xtg7DphDH-OW=Kd#NUYhS;&HV-i$OKvN<$#C8}EWij11O3EOV}I
+Td&R`Sz`)??>gTe~DWM4fR=ywy
+
+literal 0
+HcmV?d00001
+
+diff --git a/data/cuboidfever/block/wooden_door.json b/data/cuboidfever/block/wooden_door.json
+new file mode 100644
+index 0000000..ad71569
+--- /dev/null
++++ b/data/cuboidfever/block/wooden_door.json
+@@ -0,0 +1,36 @@
++{
++  "name": "cuboidfever:wooden_door",
++  "solid": true,
++  "transparent": true,
++  "fullBlock": false,
++  "replaceable": false,
++  "renderType": "door",
++  "renderLayer": "transparent",
++  "emissive": false,
++  "lightAttenuation": 0,
++  "emission": { "r": 0, "g": 0, "b": 0 },
++  "tint": [255, 255, 255],
++
++  "properties": {
++    "facing": ["north", "east", "south", "west"],
++    "half": ["lower", "upper"],
++    "open": ["false", "true"]
++  },
++
++  "variants": [
++    {
++      "when": { "half": "lower" },
++      "textures": {
++        "all": "cuboidfever:wooden_door_bottom_f",
++        "edge": "cuboidfever:wooden_door_bottom_s"
++      }
++    },
++    {
++      "when": { "half": "upper" },
++      "textures": {
++        "all": "cuboidfever:wooden_door_top_f",
++        "edge": "cuboidfever:wooden_door_top_s"
++      }
++    }
++  ]
++}
+diff --git a/data/cuboidfever/hotbar.json b/data/cuboidfever/hotbar.json
+index b5fa799..2e70470 100644
+--- a/data/cuboidfever/hotbar.json
++++ b/data/cuboidfever/hotbar.json
+@@ -30,6 +30,7 @@
+     "cuboidfever:leaves",
+     "cuboidfever:planks",
+     "cuboidfever:wooden_crate",
++    "cuboidfever:wooden_door",
+     "cuboidfever:torch",
+     "cuboidfever:candle",
+     "cuboidfever:lamp",
+-- 
+2.43.0
+
+
+From 257f6cde15815733367a2511418268dd409e5b0e Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 10 Nov 2026 16:24:38 -0500
+Subject: [PATCH 2/2] Add double doors (hinge state) and cap texture support
+
+- New "hinge" (left/right) door property: 32 door states. The open slab
+  swings to the hinge side; right-hinged fronts are mirrored.
+- Placing a door beside a left-hinged door of the same facing makes the new
+  one right-hinged (matching its open state), forming a double door.
+- Right-clicking either door of a pair toggles both.
+- Door top/bottom faces use an optional "cap" texture key (falls back to the
+  edge texture until the PNG is added).
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01L3RoKZqiDdp3wpP3VHcmMS
+---
+ BlockInteraction.cs                     | 60 ++++++++++++++++++++++---
+ BlockRegistry.cs                        | 18 ++++++--
+ BlockShapes.cs                          | 16 ++++---
+ ChunkMesher.cs                          | 15 ++++---
+ CuboidFever.Tests/BlockShapesTests.cs   | 57 ++++++++++++++++++-----
+ data/cuboidfever/block/wooden_door.json |  3 +-
+ 6 files changed, 138 insertions(+), 31 deletions(-)
+
+diff --git a/BlockInteraction.cs b/BlockInteraction.cs
+index 136b55a..96a3f2b 100644
+--- a/BlockInteraction.cs
++++ b/BlockInteraction.cs
+@@ -180,6 +180,12 @@ public sealed class BlockInteraction
+ 
+         byte door = registry.GetDefaultState(_hotbar.SelectedId);
+         door = registry.WithState(door, "facing", facing);
++
++        // Next to a door of the same facing whose hinge is on the outside, hinge on the other side to make a
++        // double door; otherwise the hinge is on the left.
++        bool hingeRight = HingeForNewDoor(x, y, z, BlockShapes.FacingFromName(facing), out bool neighborOpen);
++        door = registry.WithState(door, "hinge", hingeRight ? "right" : "left");
++        if (hingeRight) door = registry.WithState(door, "open", neighborOpen ? "true" : "false"); // match its pair
+         byte lower = registry.WithState(door, "half", "lower");
+         byte upper = registry.WithState(door, "half", "upper");
+ 
+@@ -200,25 +206,67 @@ public sealed class BlockInteraction
+     private bool TryUseTarget()
+     {
+         var (x, y, z) = Target;
++        var registry = BlockRegistry.Instance;
++        var info = registry.Info;
+         byte block = _world.GetBlock(x, y, z);
+-        var info = BlockRegistry.Instance.Info;
+         if (!info[block].IsDoor) return false;
+ 
+-        var registry = BlockRegistry.Instance;
+         string open = info[block].DoorOpen ? "false" : "true";
+ 
++        SetDoorOpen(x, y, z, open);
++
++        // A double door opens and closes as one: the matching door beside this one follows
++        if (TryGetDoubleDoorPartner(x, y, z, out int pairX, out int pairZ))
++            SetDoorOpen(pairX, y, pairZ, open);
++
++        // No dedicated door sounds yet, so reuse the block sounds
++        _audioManager?.PlaySound(open == "true" ? "place" : "break", 0.6f);
++        return true;
++    }
++
++    // Sets the open state of the door at (x, y, z) and of its other half.
++    private void SetDoorOpen(int x, int y, int z, string open)
++    {
++        var registry = BlockRegistry.Instance;
++
++        byte block = _world.GetBlock(x, y, z);
+         _world.SetBlock(x, y, z, registry.WithState(block, "open", open));
+ 
+-        // Keep the other half in step with this one
+         if (TryGetDoorPartner(x, y, z, out int partnerY))
+         {
+             byte partner = _world.GetBlock(x, partnerY, z);
+             _world.SetBlock(x, partnerY, z, registry.WithState(partner, "open", open));
+         }
++    }
+ 
+-        // No dedicated door sounds yet, so reuse the block sounds
+-        _audioManager?.PlaySound(open == "true" ? "place" : "break", 0.6f);
+-        return true;
++    // True when a door placed at (x, y, z) should hang its hinge on the right: there is a left-hinged door of the
++    // same facing on its left, so the two make a double door with the hinges on the outside.
++    private bool HingeForNewDoor(int x, int y, int z, int facing, out bool neighborOpen)
++    {
++        var (dx, dz) = BlockShapes.LeftOf(facing);
++        var other = BlockRegistry.Instance.Info[_world.GetBlock(x + dx, y, z + dz)];
++
++        neighborOpen = other.DoorOpen;
++        return other.IsDoor && !other.DoorUpper && other.DoorFacing == facing && !other.DoorHingeRight;
++    }
++
++    // The door that forms a double door with the one at (x, y, z): beside it, same facing and half, hinge on the
++    // opposite side. A left-hinged door's partner is on its right and a right-hinged door's is on its left.
++    private bool TryGetDoubleDoorPartner(int x, int y, int z, out int pairX, out int pairZ)
++    {
++        var info = BlockRegistry.Instance.Info;
++        var self = info[_world.GetBlock(x, y, z)];
++
++        var (lx, lz) = BlockShapes.LeftOf(self.DoorFacing);
++        int side = self.DoorHingeRight ? 1 : -1;
++        pairX = x + lx * side;
++        pairZ = z + lz * side;
++
++        var other = info[_world.GetBlock(pairX, y, pairZ)];
++        return other.IsDoor
++            && other.DoorUpper == self.DoorUpper
++            && other.DoorFacing == self.DoorFacing
++            && other.DoorHingeRight != self.DoorHingeRight;
+     }
+ 
+     // The other half of the door at (x, y, z), if it is there and really is the matching half.
+diff --git a/BlockRegistry.cs b/BlockRegistry.cs
+index 87dc890..b2ace4d 100644
+--- a/BlockRegistry.cs
++++ b/BlockRegistry.cs
+@@ -20,7 +20,7 @@ public struct BlockInfo
+     public int FluidLevel;
+ 
+     // Doors: a thin slab whose position comes from the block state (see BlockShapes). DoorFacing is 0..3.
+-    public bool IsDoor, DoorOpen, DoorUpper;
++    public bool IsDoor, DoorOpen, DoorUpper, DoorHingeRight;
+     public byte DoorFacing;
+ 
+     // Which update rules the block follows when it or a neighbour changes (see BlockTickScheduler)
+@@ -37,6 +37,7 @@ public sealed class BlockRegistry
+     public readonly BlockInfo[] Info = new BlockInfo[256];
+     private readonly TextureRegion[] _faceRegions = new TextureRegion[256 * 6];
+     private readonly TextureRegion[] _edgeRegions = new TextureRegion[256];
++    private readonly TextureRegion[] _capRegions = new TextureRegion[256];
+ 
+     public float InsetU { get; private set; }
+     public float InsetV { get; private set; }
+@@ -46,6 +47,9 @@ public sealed class BlockRegistry
+     // The narrow-edge texture of a door (its "edge" texture key); other blocks just return their face 0 texture.
+     public TextureRegion EdgeRegion(byte id) => _edgeRegions[id];
+ 
++    // The texture for the top and bottom faces of a door (its "cap" key); falls back to the edge texture.
++    public TextureRegion CapRegion(byte id) => _capRegions[id];
++
+     private void Bake()
+     {
+         var atlas = TextureAtlas.Instance
+@@ -70,11 +74,12 @@ public sealed class BlockRegistry
+                 if (!def.State.TryGetValue("facing", out string facingName) ||
+                     (doorFacing = BlockShapes.FacingFromName(facingName)) < 0 ||
+                     !def.State.TryGetValue("half", out string half) || (half != "lower" && half != "upper") ||
+-                    !def.State.TryGetValue("open", out string open) || (open != "false" && open != "true"))
++                    !def.State.TryGetValue("open", out string open) || (open != "false" && open != "true") ||
++                    !def.State.TryGetValue("hinge", out string hinge) || (hinge != "left" && hinge != "right"))
+                 {
+                     throw new InvalidDataException(
+                         $"Block '{name}' is a door, so it needs the properties facing (north/east/south/west), " +
+-                        "half (lower/upper) and open (false/true).");
++                        "half (lower/upper), open (false/true) and hinge (left/right).");
+                 }
+             }
+ 
+@@ -91,6 +96,7 @@ public sealed class BlockRegistry
+                 DoorFacing = (byte)doorFacing,
+                 DoorOpen = isDoor && def.State["open"] == "true",
+                 DoorUpper = isDoor && def.State["half"] == "upper",
++                DoorHingeRight = isDoor && def.State["hinge"] == "right",
+                 IsAir = name.Equals("cuboidfever:air", StringComparison.OrdinalIgnoreCase),
+                 IsWater = isWater,
+                 FluidLevel = isWater ? def.FluidLevel : -1,
+@@ -113,6 +119,12 @@ public sealed class BlockRegistry
+                                !string.IsNullOrWhiteSpace(edge)
+                 ? TextureAtlas.Instance.GetRegion(edge)
+                 : _faceRegions[id * 6];
++
++            _capRegions[id] = def.Textures != null &&
++                              def.Textures.TryGetValue("cap", out string cap) &&
++                              !string.IsNullOrWhiteSpace(cap)
++                ? TextureAtlas.Instance.GetRegion(cap)
++                : _edgeRegions[id];
+         }
+ 
+         BuildWaterTable();
+diff --git a/BlockShapes.cs b/BlockShapes.cs
+index bdc829a..d9fa0a0 100644
+--- a/BlockShapes.cs
++++ b/BlockShapes.cs
+@@ -5,7 +5,8 @@ namespace CuboidFever;
+ 
+ // Geometry for blocks that are not a full cube. Today that is only the door: a 3/16 thick slab that fills the
+ // block's height and one of its edges. Closed it lies along the edge behind the player who placed it; open it has
+-// swung round to the player's left-hand edge, so it is never in the way of the doorway.
++// swung round to the edge on its hinge side (left or right of the player who placed it), so it is out of the doorway.
++// Two doors side by side with their hinges on opposite sides form a double door.
+ //
+ // Facing is stored as 0..3 in BlockInfo, clockwise seen from above: north (-Z), east (+X), south (+Z), west (-X).
+ // A door's "facing" is the way the player was looking when they placed it.
+@@ -17,6 +18,9 @@ public static class BlockShapes
+     private static readonly int[] FacingDX = { 0, 1, 0, -1 };
+     private static readonly int[] FacingDZ = { -1, 0, 1, 0 };
+ 
++    // The block-offset (dx, dz) of the left-hand side of a door with this facing, as seen by the player who placed it.
++    public static (int dx, int dz) LeftOf(int facing) => (FacingDZ[facing], -FacingDX[facing]);
++
+     public static int FacingFromName(string name) => Array.IndexOf(FacingNames, name);
+ 
+     // The facing closest to a horizontal look direction.
+@@ -27,13 +31,13 @@ public static class BlockShapes
+     }
+ 
+     // Box of the door block in block-local coordinates (0..1 on every axis).
+-    public static void DoorBox(int facing, bool open, out Vector3 min, out Vector3 max)
++    public static void DoorBox(int facing, bool open, bool hingeRight, out Vector3 min, out Vector3 max)
+     {
+         int fx = FacingDX[facing], fz = FacingDZ[facing];
+ 
+-        // Which edge the slab hugs: behind the player when closed, to the player's left when open.
++        // Which edge the slab hugs: behind the player when closed, on the hinge side when open.
+         int ex, ez;
+-        if (open) { ex = fz; ez = -fx; }
++        if (open) { ex = hingeRight ? -fz : fz; ez = hingeRight ? fx : -fx; }
+         else      { ex = -fx; ez = -fz; }
+ 
+         float x0 = 0f, x1 = 1f, z0 = 0f, z1 = 1f;
+@@ -49,12 +53,12 @@ public static class BlockShapes
+     }
+ 
+     public static void DoorBox(in BlockInfo info, out Vector3 min, out Vector3 max) =>
+-        DoorBox(info.DoorFacing, info.DoorOpen, out min, out max);
++        DoorBox(info.DoorFacing, info.DoorOpen, info.DoorHingeRight, out min, out max);
+ 
+     // The same box in world coordinates for the door at block (x, y, z).
+     public static void DoorBox(in BlockInfo info, int x, int y, int z, out Vector3 min, out Vector3 max)
+     {
+-        DoorBox(info.DoorFacing, info.DoorOpen, out min, out max);
++        DoorBox(info.DoorFacing, info.DoorOpen, info.DoorHingeRight, out min, out max);
+         var origin = new Vector3(x, y, z);
+         min += origin;
+         max += origin;
+diff --git a/ChunkMesher.cs b/ChunkMesher.cs
+index fc6c573..73a149f 100644
+--- a/ChunkMesher.cs
++++ b/ChunkMesher.cs
+@@ -253,7 +253,8 @@ public static class ChunkMesher
+             Color skyColor,
+             TextureRegion region,
+             float uSpan,
+-            bool swapUv)
++            bool swapUv,
++            bool mirrorU = false)
+         {
+             int start = V.Count;
+ 
+@@ -280,6 +281,7 @@ public static class ChunkMesher
+             {
+                 Vector3 corner = FaceCorners[f][c];
+                 Vector2 uvc = swapUv ? new Vector2(uvs[c].Y, uvs[c].X) : uvs[c];
++                if (mirrorU) uvc.X = 1f - uvc.X;
+ 
+                 var uv = new Vector2(
+                     region.U0 + _insetU + uvc.X * (widthU - 2f * _insetU),
+@@ -721,8 +723,8 @@ public static class ChunkMesher
+     }
+ 
+     // A door is a thin slab (BlockShapes.DoorBox). All six faces are always drawn: the slab never hides a neighbour,
+-    // and you can see both sides of it. The wide faces use the block's main texture and the four narrow ones its
+-    // "edge" texture; both come from the state, so the lower and upper halves can look different.
++    // and you can see both sides of it. The wide faces use the block's main texture, the top and bottom its "cap"
++    // texture and the two end faces its "edge" texture; all come from the state, so the halves can differ.
+     private static void MeshDoor(
+         Buffers b,
+         in BlockInfo self,
+@@ -739,6 +741,7 @@ public static class ChunkMesher
+ 
+         TextureRegion front = registry.FastRegion(id, 0);
+         TextureRegion edge = registry.EdgeRegion(id);
++        TextureRegion cap = registry.CapRegion(id);
+ 
+         for (int f = 0; f < 6; f++)
+         {
+@@ -757,9 +760,11 @@ public static class ChunkMesher
+                 bmax,
+                 color,
+                 skyColor,
+-                wide ? front : edge,
++                wide ? front : axis == 1 ? cap : edge,
+                 wide ? 1f : BlockShapes.DoorThickness,
+-                swapUv: axis == 1 && !thinInX);
++                swapUv: axis == 1 && !thinInX,
++                // Hinge on the right: mirror the front so the handle stays on the free edge and pairs match
++                mirrorU: wide && self.DoorHingeRight);
+         }
+     }
+ 
+diff --git a/CuboidFever.Tests/BlockShapesTests.cs b/CuboidFever.Tests/BlockShapesTests.cs
+index 4bf3608..1bda389 100644
+--- a/CuboidFever.Tests/BlockShapesTests.cs
++++ b/CuboidFever.Tests/BlockShapesTests.cs
+@@ -30,35 +30,72 @@ public class BlockShapesTests
+     [Fact]
+     public void ClosedDoorLiesOnTheEdgeBehindThePlayer()
+     {
+-        BlockShapes.DoorBox(0, false, out var min, out var max); // looking north, so the door is on the south edge
++        BlockShapes.DoorBox(0, false, false, out var min, out var max); // looking north, so the door is on the south edge
+         AssertBox(min, max, 0f, 1f, 1f - T, 1f);
+ 
+-        BlockShapes.DoorBox(1, false, out min, out max);          // looking east: west edge
++        BlockShapes.DoorBox(1, false, false, out min, out max);          // looking east: west edge
+         AssertBox(min, max, 0f, T, 0f, 1f);
+ 
+-        BlockShapes.DoorBox(2, false, out min, out max);          // looking south: north edge
++        BlockShapes.DoorBox(2, false, false, out min, out max);          // looking south: north edge
+         AssertBox(min, max, 0f, 1f, 0f, T);
+ 
+-        BlockShapes.DoorBox(3, false, out min, out max);          // looking west: east edge
++        BlockShapes.DoorBox(3, false, false, out min, out max);          // looking west: east edge
+         AssertBox(min, max, 1f - T, 1f, 0f, 1f);
+     }
+ 
+     [Fact]
+     public void OpenDoorSwingsToThePlayersLeft()
+     {
+-        BlockShapes.DoorBox(0, true, out var min, out var max);   // looking north, left is west
++        BlockShapes.DoorBox(0, true, false, out var min, out var max);   // looking north, left is west
+         AssertBox(min, max, 0f, T, 0f, 1f);
+ 
+-        BlockShapes.DoorBox(1, true, out min, out max);           // looking east, left is north
++        BlockShapes.DoorBox(1, true, false, out min, out max);           // looking east, left is north
+         AssertBox(min, max, 0f, 1f, 0f, T);
+ 
+-        BlockShapes.DoorBox(2, true, out min, out max);           // looking south, left is east
++        BlockShapes.DoorBox(2, true, false, out min, out max);           // looking south, left is east
+         AssertBox(min, max, 1f - T, 1f, 0f, 1f);
+ 
+-        BlockShapes.DoorBox(3, true, out min, out max);           // looking west, left is south
++        BlockShapes.DoorBox(3, true, false, out min, out max);           // looking west, left is south
+         AssertBox(min, max, 0f, 1f, 1f - T, 1f);
+     }
+ 
++    [Fact]
++    public void RightHingedOpenDoorSwingsToThePlayersRight()
++    {
++        BlockShapes.DoorBox(0, true, true, out var min, out var max);   // looking north, right is east
++        AssertBox(min, max, 1f - T, 1f, 0f, 1f);
++
++        BlockShapes.DoorBox(1, true, true, out min, out max);           // looking east, right is south
++        AssertBox(min, max, 0f, 1f, 1f - T, 1f);
++
++        BlockShapes.DoorBox(2, true, true, out min, out max);           // looking south, right is west
++        AssertBox(min, max, 0f, T, 0f, 1f);
++
++        BlockShapes.DoorBox(3, true, true, out min, out max);           // looking west, right is north
++        AssertBox(min, max, 0f, 1f, 0f, T);
++    }
++
++    [Fact]
++    public void HingeSideDoesNotChangeAClosedDoor()
++    {
++        for (int facing = 0; facing < 4; facing++)
++        {
++            BlockShapes.DoorBox(facing, false, false, out var minL, out var maxL);
++            BlockShapes.DoorBox(facing, false, true, out var minR, out var maxR);
++
++            Assert.True(minL == minR && maxL == maxR);
++        }
++    }
++
++    [Fact]
++    public void LeftOfPointsTowardThePlayersLeft()
++    {
++        Assert.Equal((-1, 0), BlockShapes.LeftOf(0)); // looking north, left is west (-X)
++        Assert.Equal((0, -1), BlockShapes.LeftOf(1)); // looking east, left is north (-Z)
++        Assert.Equal((1, 0), BlockShapes.LeftOf(2));  // looking south, left is east (+X)
++        Assert.Equal((0, 1), BlockShapes.LeftOf(3));  // looking west, left is south (+Z)
++    }
++
+     [Fact]
+     public void WorldBoxIsTheLocalBoxMovedToTheBlock()
+     {
+@@ -78,7 +115,7 @@ public class BlockShapesTests
+     public void RayHitsTheSlabButPassesThroughTheGap()
+     {
+         // Closed door facing north: slab at z in [13/16, 1] of block (0, 0, 0)
+-        BlockShapes.DoorBox(0, false, out var min, out var max);
++        BlockShapes.DoorBox(0, false, false, out var min, out var max);
+ 
+         Assert.True(BlockShapes.RayHitsBox(new Vector3(0.5f, 0.5f, 3f), new Vector3(0, 0, -1), min, max, 5f));
+         Assert.False(BlockShapes.RayHitsBox(new Vector3(0.5f, 0.5f, 3f), new Vector3(0, 0, -1), min, max, 1.5f)); // too short
+@@ -89,7 +126,7 @@ public class BlockShapesTests
+     [Fact]
+     public void RayParallelToAnAxisIsHandled()
+     {
+-        BlockShapes.DoorBox(0, false, out var min, out var max);
++        BlockShapes.DoorBox(0, false, false, out var min, out var max);
+ 
+         // Travelling along the slab's wide face, inside its thickness
+         Assert.True(BlockShapes.RayHitsBox(new Vector3(-2f, 0.5f, 0.95f), new Vector3(1, 0, 0), min, max, 5f));
+diff --git a/data/cuboidfever/block/wooden_door.json b/data/cuboidfever/block/wooden_door.json
+index ad71569..91e8eab 100644
+--- a/data/cuboidfever/block/wooden_door.json
++++ b/data/cuboidfever/block/wooden_door.json
+@@ -14,7 +14,8 @@
+   "properties": {
+     "facing": ["north", "east", "south", "west"],
+     "half": ["lower", "upper"],
+-    "open": ["false", "true"]
++    "open": ["false", "true"],
++    "hinge": ["left", "right"]
+   },
+ 
+   "variants": [
+-- 
+2.43.0
+
