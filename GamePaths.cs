@@ -17,13 +17,24 @@ public static class GamePaths
     public static readonly string TextureAtlasConfig = Path.Combine(DataRoot, "texture_atlas.json");
     public static readonly string DayNightConfig = Path.Combine(DataRoot, "daynight.json");
 
-    // Saved worlds, one folder per world. Kept in the user's app-data folder rather than next to the
-    // executable: the build output folder is wiped by a clean or rebuild, and that must never delete saves.
-    // (Windows: %APPDATA%\CuboidFever\saves, Linux: ~/.config/CuboidFever/saves)
+    // Everything the player owns lives in the user's app-data folder rather than next to the executable: the
+    // build output folder is wiped by a clean or rebuild, and that must never delete saves or resource packs.
+    // (Windows: %APPDATA%\CuboidFever, Linux: ~/.config/CuboidFever)
     //
     // SpecialFolderOption.Create matters on Linux and macOS, where GetFolderPath returns an empty string for a
     // folder that does not exist yet (a fresh ~/.config). Without it the path would silently become relative.
-    public static readonly string SavesRoot = Path.Combine(
+    //
+    // Declared before the paths below: static fields are initialized in the order they are written.
+    private static readonly string AppDataRoot = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData, Environment.SpecialFolderOption.Create),
-        "CuboidFever", "saves");
+        "CuboidFever");
+
+    // Saved worlds, one folder per world.
+    public static readonly string SavesRoot = Path.Combine(AppDataRoot, "saves");
+
+    // Resource packs: folders or .zip files the player drops in to replace the game's textures (ResourcePackInfo).
+    public static readonly string ResourcePackRoot = Path.Combine(AppDataRoot, "resourcepacks");
+
+    // Player options that are saved between runs, such as the selected resource pack (GameOptions).
+    public static readonly string OptionsFile = Path.Combine(AppDataRoot, "options.json");
 }

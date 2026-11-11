@@ -7,10 +7,11 @@ namespace CuboidFever;
 
 // Multi-page settings screen.
 //
-// Category page:  Video, Audio, Controls, Back
+// Category page:  Video, Audio, Controls, Resource Packs, Back
 // Video page:     Window Mode, Frame Rate Limit, GUI Scale,
 //                 Render Distance, Leaf Culling, Ambient Occlusion, Back
 // Audio page:     Master Volume, Music Volume, Back
+// Packs page:     Default, one button per resource pack found (a few per page), Page, Open Pack Folder, Back
 public sealed class SettingsMenu
 {
     private readonly GraphicsDevice _graphics;
@@ -21,7 +22,15 @@ public sealed class SettingsMenu
     private readonly ButtonMenu _videoPage;
     private readonly ButtonMenu _audioPage;
     private readonly ButtonMenu _controlsPage;
+    private readonly ButtonMenu _packsPage;
     private ButtonMenu _current;
+
+    private readonly ResourcePackManager _packs;
+    private int _packsPageIndex;
+
+    // How many packs fit on one page of the list, so the page never grows taller than the Video page
+    private const int PacksPerPage = 4;
+    private const int PackNameMaxLength = 26;
 
     private const string Title = "Settings";
     private const float TitleScale = 2f;
@@ -40,12 +49,14 @@ public sealed class SettingsMenu
         FrameRateLimiter fps,
         WindowManager window,
         AudioManager audio,
+        ResourcePackManager packs,
         Action cycleRenderDistance,
         Action meshSettingChanged,
         Action<MenuButtonSound> playMenuSound)
     {
         _graphics = graphics;
         _font = font;
+        _packs = packs;
 
         _pixel = new Texture2D(graphics, 1, 1);
         _pixel.SetData(new[] { Color.White });
@@ -60,6 +71,7 @@ public sealed class SettingsMenu
         _categoryPage.Add("Video", () => _current = _videoPage);
         _categoryPage.Add("Audio", () => _current = _audioPage);
         _categoryPage.Add("Controls", () => _current = _controlsPage);
+        _categoryPage.Add("Resource Packs", OpenPacksPage);
         _categoryPage.Add("Back", () => BackRequested?.Invoke(), MenuButtonSound.Back);
 
         // ---------- Video page ----------
@@ -131,6 +143,16 @@ public sealed class SettingsMenu
         // ---------- Controls page ----------
         _controlsPage = CreatePlaceholderPage(graphics, font, playMenuSound, "Controls settings coming soon");
 
+        // ---------- Resource packs page ----------
+        // Its buttons depend on what is in the folder, so they are built each time the page is opened
+        // (OpenPacksPage) rather than here.
+        _packsPage = new ButtonMenu(graphics, font, playMenuSound)
+        {
+            DesignHeight = DesignButtonHeight,
+            DesignGap = DesignButtonGap,
+            DesignWidth = 340
+        };
+
         // Set design widths for long labels
         if (font != null)
         {
@@ -173,6 +195,76 @@ public sealed class SettingsMenu
         page.Add(message, () => { });
         page.Add("Back", () => _current = _categoryPage, MenuButtonSound.Back);
         return page;
+    }
+
+    // Looks at the resourcepacks folder again, so a pack dropped in while the game is running is listed
+    private void OpenPacksPage()
+    {
+        _packs.Refresh();
+        _packsPageIndex = 0;
+        RebuildPacksPage();
+        _current = _packsPage;
+    }
+
+    // One button per choice: the game's own textures first, then each pack found. The selected one is ticked, and
+    // clicking another switches to it straight away. With more than fit on a page, a Page button flips through them.
+    private void RebuildPacksPage()
+    {
+        _packsPage.Clear();
+
+        int entries = _packs.Packs.Count + 1; // entry 0 is the game's own textures
+        int pageCount = (entries + PacksPerPage - 1) / PacksPerPage;
+        _packsPageIndex = Math.Clamp(_packsPageIndex, 0, pageCount - 1);
+
+        int first = _packsPageIndex * PacksPerPage;
+        int end = Math.Min(first + PacksPerPage, entries);
+
+        for (int i = first; i < end; i++)
+        {
+            if (i == 0)
+            {
+                _packsPage.Add(
+                    () => PackLabel("Default", _packs.ActiveId == null),
+                    () => _packs.Select(null));
+            }
+            else
+            {
+                ResourcePackInfo pack = _packs.Packs[i - 1];
+
+                _packsPage.Add(
+                    () => PackLabel(pack.DisplayName, _packs.IsActive(pack)),
+                    () => _packs.Select(pack));
+            }
+        }
+
+        if (pageCount > 1)
+        {
+            _packsPage.Add(
+                () => $"Page {_packsPageIndex + 1} / {pageCount}",
+                () =>
+                {
+                    _packsPageIndex = (_packsPageIndex + 1) % pageCount;
+                    RebuildPacksPage();
+                });
+        }
+
+        _packsPage.Add("Open Pack Folder", _packs.OpenFolder);
+        _packsPage.Add("Back", () => _current = _categoryPage, MenuButtonSound.Back);
+    }
+
+    // "[x] Name" for the selected pack, "[ ] Name" for the others. A long name is cut short, and a character
+    // the menu font does not have (it covers plain ASCII only) is shown as "?" because drawing one would throw.
+    private static string PackLabel(string name, bool selected)
+    {
+        var text = new System.Text.StringBuilder(name.Length);
+        foreach (char c in name)
+            text.Append(c >= ' ' && c <= '~' ? c : '?');
+
+        string shown = text.Length <= PackNameMaxLength
+            ? text.ToString()
+            : text.ToString(0, PackNameMaxLength - 3) + "...";
+
+        return (selected ? "[x] " : "[ ] ") + shown;
     }
 
     private static string LeafCullLabel(int depth) =>

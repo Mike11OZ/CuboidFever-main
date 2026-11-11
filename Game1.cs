@@ -61,6 +61,7 @@ public class Game1 : Game
     private MainMenu _mainMenu = null!;
     private PauseMenu _pauseMenu = null!;
     private SettingsMenu _settingsMenu = null!;
+    private ResourcePackManager _resourcePacks = null!; // the selected texture pack, applied to the texture atlas
 
     // ---- Audio ----
     private AudioManager _audioManager = null!;
@@ -125,6 +126,7 @@ public class Game1 : Game
         // Weights are all 1 for now. The log line printed after each step shows its time in ms,
         // so slow steps can be given a bigger weight to make the bar advance more evenly.
         _startup.AddStep("Texture atlas", InitTextureAtlas);
+        _startup.AddStep("Resource packs", InitResourcePacks);
         _startup.AddStep("Window and fonts", InitWindowAndFonts);
         _startup.AddStep("Block registry", InitBlockRegistry);
         _startup.AddStep("Input and day/night", InitInputAndDayNight);
@@ -144,6 +146,14 @@ public class Game1 : Game
     private void InitTextureAtlas()
     {
         TextureAtlas.Initialize(GraphicsDevice, GamePaths.BlockTextureRoot, GamePaths.TextureAtlasConfig);
+    }
+
+    // Right after the atlas: the pack is drawn into the atlas's own texture, so everything built later (the HUD,
+    // each world's renderer and particles) already sees it.
+    private void InitResourcePacks()
+    {
+        _resourcePacks = new ResourcePackManager(GraphicsDevice, GamePaths.ResourcePackRoot, GamePaths.OptionsFile);
+        _resourcePacks.ApplySaved();
     }
 
     private void InitWindowAndFonts()
@@ -263,6 +273,7 @@ public class Game1 : Game
             _fps,
             _windowManager,
             _audioManager,
+            _resourcePacks,
             CycleRenderDistance,
             OnMeshSettingChanged,
             _audioManager.PlayMenuSound

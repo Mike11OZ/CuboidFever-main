@@ -54,8 +54,15 @@ public sealed class TextureAtlas
     public int Width => Texture.Width;
     public int Height => Texture.Height;
 
+    // Every texture's resource name starts with this: blocks/stone.png becomes cuboidfever:stone
+    private const string NamePrefix = "cuboidfever:";
+
     private readonly Dictionary<string, TextureRegion> _regions =
         new(StringComparer.OrdinalIgnoreCase);
+
+    // The atlas exactly as built from the game's own textures. A resource pack is drawn over a fresh copy of this
+    // each time, so switching packs never leaves the previous pack's textures behind.
+    private readonly Color[] _basePixels;
 
     public static void Initialize(
         GraphicsDevice device,
@@ -176,7 +183,7 @@ public sealed class TextureAtlas
 
             // A file at blocks/stone.png becomes cuboidfever:stone.
             string relative = Path.GetRelativePath(textureDirectory, file);
-            string resourceName = "cuboidfever:" +
+            string resourceName = NamePrefix +
                 Path.ChangeExtension(relative, null)
                     .Replace('\\', '/');
 
@@ -192,6 +199,8 @@ public sealed class TextureAtlas
             }
         }
 
+        _basePixels = (Color[])Pixels.Clone();
+
         Console.WriteLine($"Loaded {_regions.Count} textures.");
 
         foreach (var name in _regions.Keys.OrderBy(n => n))
@@ -201,6 +210,79 @@ public sealed class TextureAtlas
 
         Texture = new Texture2D(device, atlasWidth, atlasHeight);
         Texture.SetData(Pixels);
+    }
+
+    // Draws a resource pack's textures over the game's own, or puts the game's own back when given null.
+    // packTextures is keyed by texture name without "cuboidfever:" or ".png" (ResourcePackInfo.ReadBlockTextures).
+    // Returns how many textures the pack replaced.
+    //
+    // The atlas keeps its layout and its Texture2D and Pixels objects; only the pixels inside change. That is what
+    // lets this run while a world is open: the renderer, the HUD and the particle system all hold the same texture
+    // or array, and every chunk mesh holds the same UV coordinates, so nothing has to be rebuilt.
+    // Must run on the main thread, because it uploads the texture.
+    public int ApplyPack(GraphicsDevice device, IReadOnlyDictionary<string, byte[]> packTextures)
+    {
+        Array.Copy(_basePixels, Pixels, Pixels.Length);
+
+        int replaced = 0;
+
+        if (packTextures != null && packTextures.Count > 0)
+        {
+            var tile = new Color[TextureSize * TextureSize];
+
+            foreach (var (name, region) in _regions)
+            {
+                if (!packTextures.TryGetValue(name.Substring(NamePrefix.Length), out byte[] png))
+                    continue;
+
+                if (!TryDecodeTile(device, png, name, tile))
+                    continue;
+
+                Rectangle bounds = region.PixelBounds;
+                for (int y = 0; y < TextureSize; y++)
+                {
+                    Array.Copy(
+                        tile,
+                        y * TextureSize,
+                        Pixels,
+                        (bounds.Y + y) * Width + bounds.X,
+                        TextureSize);
+                }
+
+                replaced++;
+            }
+        }
+
+        Texture.SetData(Pixels);
+        return replaced;
+    }
+
+    // Reads one pack texture into tile. A texture of the wrong size or that cannot be read is skipped with a
+    // warning, so one bad file in a pack does not stop the rest of it from loading.
+    private bool TryDecodeTile(GraphicsDevice device, byte[] png, string name, Color[] tile)
+    {
+        try
+        {
+            using var stream = new MemoryStream(png);
+            using var texture = Texture2D.FromStream(device, stream);
+
+            if (texture.Width != TextureSize || texture.Height != TextureSize)
+            {
+                Console.WriteLine(
+                    $"[Warning] Resource pack texture for {name} is {texture.Width}x{texture.Height}; " +
+                    $"expected {TextureSize}x{TextureSize}. Ignored.");
+                return false;
+            }
+
+            texture.GetData(tile);
+            return true;
+        }
+        catch (Exception e)
+        {
+            // The image decoder throws different exceptions for different kinds of bad file
+            Console.WriteLine($"[Warning] Resource pack texture for {name} could not be read: {e.Message}");
+            return false;
+        }
     }
 
     public TextureRegion GetRegion(string resourceName)
