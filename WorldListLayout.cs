@@ -137,6 +137,26 @@ public static class WorldListLayout
         return (rowX + rowWidth - border - margin - width, rowY + (rowHeight - height) / 2, width, height);
     }
 
+    // The largest rectangle with a picture's shape that fits, centered, inside a box. The picture is shrunk or
+    // enlarged evenly and never stretched, so a square picture in a wide box gets empty space either side.
+    // Used where the picture is not known to be the box's shape (a resource pack's pack.png).
+    public static (int x, int y, int width, int height) FitInside(
+        int boxX, int boxY, int boxWidth, int boxHeight, int pictureWidth, int pictureHeight)
+    {
+        if (boxWidth <= 0 || boxHeight <= 0)
+            return (boxX, boxY, Math.Max(0, boxWidth), Math.Max(0, boxHeight));
+
+        // A picture with no size cannot be fitted; fill the box rather than divide by zero
+        if (pictureWidth <= 0 || pictureHeight <= 0)
+            return (boxX, boxY, boxWidth, boxHeight);
+
+        double fit = Math.Min(boxWidth / (double)pictureWidth, boxHeight / (double)pictureHeight);
+        int width = Math.Clamp((int)Math.Round(pictureWidth * fit), 1, boxWidth);
+        int height = Math.Clamp((int)Math.Round(pictureHeight * fit), 1, boxHeight);
+
+        return (boxX + (boxWidth - width) / 2, boxY + (boxHeight - height) / 2, width, height);
+    }
+
     public static string DisplayName(string name)
     {
         name = (name ?? string.Empty).Trim();

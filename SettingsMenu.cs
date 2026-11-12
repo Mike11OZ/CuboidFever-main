@@ -11,7 +11,7 @@ namespace CuboidFever;
 // Video page:     Window Mode, Frame Rate Limit, GUI Scale,
 //                 Render Distance, Leaf Culling, Ambient Occlusion, Back
 // Audio page:     Master Volume, Music Volume, Back
-// Packs page:     Default, one button per resource pack found (a few per page), Page, Open Pack Folder, Back
+// Packs screen:   a scrolling list of resource packs with their pictures (ResourcePackListScreen)
 public sealed class SettingsMenu
 {
     private readonly GraphicsDevice _graphics;
@@ -22,15 +22,13 @@ public sealed class SettingsMenu
     private readonly ButtonMenu _videoPage;
     private readonly ButtonMenu _audioPage;
     private readonly ButtonMenu _controlsPage;
-    private readonly ButtonMenu _packsPage;
     private ButtonMenu _current;
 
+    // The resource pack list is not a stack of buttons, so it is its own screen. While it is showing, it is
+    // updated and drawn instead of _current (the same way MainMenu shows its world list).
     private readonly ResourcePackManager _packs;
-    private int _packsPageIndex;
-
-    // How many packs fit on one page of the list, so the page never grows taller than the Video page
-    private const int PacksPerPage = 4;
-    private const int PackNameMaxLength = 26;
+    private readonly ResourcePackListScreen _packList;
+    private bool _showingPackList;
 
     private const string Title = "Settings";
     private const float TitleScale = 2f;
@@ -46,6 +44,7 @@ public sealed class SettingsMenu
     public SettingsMenu(
         GraphicsDevice graphics,
         SpriteFont font,
+        SpriteFont smallFont,
         FrameRateLimiter fps,
         WindowManager window,
         AudioManager audio,
@@ -143,15 +142,13 @@ public sealed class SettingsMenu
         // ---------- Controls page ----------
         _controlsPage = CreatePlaceholderPage(graphics, font, playMenuSound, "Controls settings coming soon");
 
-        // ---------- Resource packs page ----------
-        // Its buttons depend on what is in the folder, so they are built each time the page is opened
-        // (OpenPacksPage) rather than here.
-        _packsPage = new ButtonMenu(graphics, font, playMenuSound)
-        {
-            DesignHeight = DesignButtonHeight,
-            DesignGap = DesignButtonGap,
-            DesignWidth = 340
-        };
+        // ---------- Resource packs screen ----------
+        // What it lists depends on what is in the folder, so the rows are filled in each time it is opened
+        // (OpenPacksPage) rather than here. Picking a row switches to that pack straight away.
+        _packList = new ResourcePackListScreen(graphics, font, smallFont, () => _packs.ActiveId, playMenuSound);
+        _packList.PackSelected += pack => _packs.Select(pack);
+        _packList.OpenFolderRequested += _packs.OpenFolder;
+        _packList.BackRequested += ClosePackList;
 
         // Set design widths for long labels
         if (font != null)
@@ -201,70 +198,16 @@ public sealed class SettingsMenu
     private void OpenPacksPage()
     {
         _packs.Refresh();
-        _packsPageIndex = 0;
-        RebuildPacksPage();
-        _current = _packsPage;
+        _packList.SetPacks(_packs.Packs);
+        _showingPackList = true;
     }
 
-    // One button per choice: the game's own textures first, then each pack found. The selected one is ticked, and
-    // clicking another switches to it straight away. With more than fit on a page, a Page button flips through them.
-    private void RebuildPacksPage()
+    // Back from the pack list: to the category page, freeing the pictures the list was holding
+    private void ClosePackList()
     {
-        _packsPage.Clear();
-
-        int entries = _packs.Packs.Count + 1; // entry 0 is the game's own textures
-        int pageCount = (entries + PacksPerPage - 1) / PacksPerPage;
-        _packsPageIndex = Math.Clamp(_packsPageIndex, 0, pageCount - 1);
-
-        int first = _packsPageIndex * PacksPerPage;
-        int end = Math.Min(first + PacksPerPage, entries);
-
-        for (int i = first; i < end; i++)
-        {
-            if (i == 0)
-            {
-                _packsPage.Add(
-                    () => PackLabel("Default", _packs.ActiveId == null),
-                    () => _packs.Select(null));
-            }
-            else
-            {
-                ResourcePackInfo pack = _packs.Packs[i - 1];
-
-                _packsPage.Add(
-                    () => PackLabel(pack.DisplayName, _packs.IsActive(pack)),
-                    () => _packs.Select(pack));
-            }
-        }
-
-        if (pageCount > 1)
-        {
-            _packsPage.Add(
-                () => $"Page {_packsPageIndex + 1} / {pageCount}",
-                () =>
-                {
-                    _packsPageIndex = (_packsPageIndex + 1) % pageCount;
-                    RebuildPacksPage();
-                });
-        }
-
-        _packsPage.Add("Open Pack Folder", _packs.OpenFolder);
-        _packsPage.Add("Back", () => _current = _categoryPage, MenuButtonSound.Back);
-    }
-
-    // "[x] Name" for the selected pack, "[ ] Name" for the others. A long name is cut short, and a character
-    // the menu font does not have (it covers plain ASCII only) is shown as "?" because drawing one would throw.
-    private static string PackLabel(string name, bool selected)
-    {
-        var text = new System.Text.StringBuilder(name.Length);
-        foreach (char c in name)
-            text.Append(c >= ' ' && c <= '~' ? c : '?');
-
-        string shown = text.Length <= PackNameMaxLength
-            ? text.ToString()
-            : text.ToString(0, PackNameMaxLength - 3) + "...";
-
-        return (selected ? "[x] " : "[ ] ") + shown;
+        _showingPackList = false;
+        _packList.Clear();
+        _current = _categoryPage;
     }
 
     private static string LeafCullLabel(int depth) =>
@@ -294,10 +237,19 @@ public sealed class SettingsMenu
     public void Update(ActionInput input)
     {
         UpdateLayout();
-        _current.Update(input);
+
+        if (_showingPackList) _packList.Update(input);
+        else _current.Update(input);
     }
 
-    public void ShowCategoryPage() => _current = _categoryPage;
+    // Goes back to the first page. Called when settings is opened, so it never opens on a sub-page (or the pack
+    // list) left showing earlier.
+    public void ShowCategoryPage()
+    {
+        _showingPackList = false;
+        _packList.Clear(); // frees the pictures
+        _current = _categoryPage;
+    }
 
     public void Draw(SpriteBatch sprites, GraphicsDevice graphics, bool overWorld)
     {
@@ -320,7 +272,8 @@ public sealed class SettingsMenu
             );
         }
 
-        if (_font != null)
+        // The pack list has its own heading, so "Settings" is left out while it is showing
+        if (_font != null && !_showingPackList)
         {
             float titleScale = TitleScale * GuiScale.Text(GuiScale.For(graphics));
             Vector2 titleSize = _font.MeasureString(Title) * titleScale;
@@ -343,7 +296,8 @@ public sealed class SettingsMenu
             );
         }
 
-        _current.Draw(sprites);
+        if (_showingPackList) _packList.Draw(sprites);
+        else _current.Draw(sprites);
 
         sprites.End();
     }

@@ -10,8 +10,8 @@ Packs live in the `resourcepacks` folder inside the game's app-data folder:
 - Linux: `~/.config/CuboidFever/resourcepacks`
 
 The folder is created the first time the game starts. In game, **Settings > Resource Packs > Open Pack Folder**
-opens it. Drop a pack in (a folder or a `.zip`), then open the Resource Packs page (or reopen it) and the pack is
-listed. Click a pack to use it; the change shows immediately, even in a running world. The choice is remembered
+opens it. Drop a pack in (a folder or a `.zip`), then open the Resource Packs list (or reopen it) and the pack is
+listed. Click a pack to use it (the one in use is outlined and tagged "Selected"); the change shows immediately, even in a running world. The choice is remembered
 in `options.json` next to the `saves` folder.
 
 ## Making a pack
@@ -36,6 +36,16 @@ MyPack/
   is printed to the console) and the default one is used.
 - In a `.zip`, `assets/` must be at the top of the zip, not inside an extra folder.
 - The name shown in the list is the folder name, or the zip's file name without `.zip`.
+
+### Pack picture
+
+Put a `pack.png` at the top level of the pack (next to `assets/`, not inside it) and the Resource Packs list
+shows it beside the pack's name, like a world's picture in the world list.
+
+- Any shape works. It is fitted inside the list's 16:9 box without stretching, so a square picture gets empty
+  space at the sides. 128x128 or 256x256 is plenty.
+- It must be a PNG, at most 1024x1024 pixels and 1 MB. Anything else is ignored and the pack shows a dark
+  placeholder, the same as a pack with no `pack.png`.
 
 ## Not covered yet
 

@@ -270,6 +270,7 @@ public class Game1 : Game
         _settingsMenu = new SettingsMenu(
             GraphicsDevice,
             _menuFont,
+            _menuFontSmall,
             _fps,
             _windowManager,
             _audioManager,

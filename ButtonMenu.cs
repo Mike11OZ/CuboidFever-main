@@ -43,6 +43,10 @@ public sealed class ButtonMenu
     public int DesignHeight { get; set; } = 48;
     public int DesignGap { get; set; } = 16;
 
+    // Moves the whole stack left (negative) or right of the middle of the screen, in design pixels. Lets two
+    // single-button menus sit side by side in a footer.
+    public int DesignOffsetX { get; set; } = 0;
+
     // Never let a button reach the screen edges, however small the window gets
     private const int ScreenMargin = 20;
 
@@ -236,7 +240,7 @@ public sealed class ButtonMenu
         int height = Math.Max(1, GuiScale.Pixels(DesignHeight * scale));
         int gap = GuiScale.Pixels(DesignGap * scale);
 
-        int x = (screenWidth - width) / 2;
+        int x = (screenWidth - width) / 2 + GuiScale.Pixels(DesignOffsetX * scale);
         int y = GuiScale.Pixels(screenHeight * Top) + index * (height + gap);
 
         return new Rectangle(x, y, width, height);

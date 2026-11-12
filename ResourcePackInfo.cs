@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
@@ -16,15 +17,29 @@ namespace CuboidFever;
 //
 // A pack only needs the textures it changes. Anything it leaves out keeps the game's own texture.
 // Textures must be the same size as the game's (16x16 at the moment); others are ignored (TextureAtlas.ApplyPack).
+//
+// A pack can also have a picture, pack.png, at its top level (next to assets/). The resource pack list shows it
+// beside the pack's name.
 public sealed class ResourcePackInfo
 {
     // Where a pack keeps its textures, as a path inside a zip (always forward slashes)
     public const string TextureRoot = "assets/cuboidfever/textures/";
     public const string BlockTextureRoot = TextureRoot + "block/";
 
+    // The pack's picture for the list, at the top level of the folder or zip
+    public const string ThumbnailFileName = "pack.png";
+
+    // A picture is ignored if it is wider or taller than this many pixels. The list only draws it a few dozen
+    // pixels across, and a small file can still decode to an enormous image, so the size is checked from the PNG
+    // header before anything is decoded.
+    public const int MaxThumbnailSize = 1024;
+
     // A texture file bigger than this is ignored. Block textures are tiny, and a pack is a file the player
-    // downloaded, so there is no reason to read something huge into memory.
+    // downloaded, so there is no reason to read something huge into memory. The same goes for the picture.
     private const long MaxTextureBytes = 1024 * 1024;
+    private const long MaxThumbnailBytes = 1024 * 1024;
+
+    private static readonly byte[] PngSignature = { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A };
 
     // The pack's folder or file name. This is what is saved in the options to remember the selection.
     public string Id { get; }
@@ -148,6 +163,67 @@ public sealed class ResourcePackInfo
         }
 
         return textures;
+    }
+
+    // The PNG bytes of the pack's pack.png, or null when it has none or it is not usable (not a PNG, too big, or
+    // too many pixels). Like WorldThumbnail.TryRead, a missing or bad picture is never an error: the list just
+    // shows a placeholder.
+    public byte[] TryReadThumbnail()
+    {
+        try
+        {
+            byte[] png = IsZip ? ReadThumbnailFromZip() : ReadThumbnailFromFolder();
+            return IsUsableThumbnail(png) ? png : null;
+        }
+        catch (Exception e) when (e is IOException or InvalidDataException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private byte[] ReadThumbnailFromFolder()
+    {
+        string path = Path.Combine(Location, ThumbnailFileName);
+        if (!File.Exists(path)) return null;
+
+        long length = new FileInfo(path).Length;
+        return length == 0 || length > MaxThumbnailBytes ? null : File.ReadAllBytes(path);
+    }
+
+    private byte[] ReadThumbnailFromZip()
+    {
+        using ZipArchive zip = ZipFile.OpenRead(Location);
+
+        foreach (ZipArchiveEntry entry in zip.Entries)
+        {
+            // Only at the top of the zip: an entry named pack.png deeper down belongs to something else
+            if (!string.Equals(entry.FullName, ThumbnailFileName, StringComparison.OrdinalIgnoreCase)) continue;
+            if (entry.Length == 0 || entry.Length > MaxThumbnailBytes) return null;
+
+            using Stream stream = entry.Open();
+            using var buffer = new MemoryStream((int)entry.Length);
+            stream.CopyTo(buffer);
+            return buffer.ToArray();
+        }
+
+        return null;
+    }
+
+    // True if the bytes start like a PNG and its header says the picture is at most MaxThumbnailSize on each side.
+    // Only the header is read (the 8-byte signature, then the IHDR chunk with the width and height), so a
+    // picture that is too big is turned away without being decoded.
+    public static bool IsUsableThumbnail(byte[] data)
+    {
+        // 8 signature bytes, 4 chunk length, 4 chunk type "IHDR", 4 width, 4 height
+        if (data == null || data.Length < 24) return false;
+
+        if (!data.AsSpan(0, 8).SequenceEqual(PngSignature)) return false;
+        if (data[12] != (byte)'I' || data[13] != (byte)'H' || data[14] != (byte)'D' || data[15] != (byte)'R') return false;
+
+        int width = BinaryPrimitives.ReadInt32BigEndian(data.AsSpan(16, 4));
+        int height = BinaryPrimitives.ReadInt32BigEndian(data.AsSpan(20, 4));
+
+        return width > 0 && height > 0 && width <= MaxThumbnailSize && height <= MaxThumbnailSize;
     }
 
     // "stone.png" -> "stone", "sub\stone.png" -> "sub/stone"
