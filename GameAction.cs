@@ -13,6 +13,7 @@ public enum GameAction
     ToggleFly, ToggleHud, CycleFpsCap, CycleWindowMode, CycleLeafCulling, ToggleAo,
     PauseTime, ScrubTimeBack, ScrubTimeForward,
     ToggleDebugOverlay, CycleRenderDistance, Screenshot, ScreenshotPanoramic,
+    OpenConsole, OpenCommandConsole, // T opens the console empty, / opens it with a slash already typed
 
     // Application
     Pause,

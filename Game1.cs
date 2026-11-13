@@ -12,6 +12,8 @@ public class Game1 : Game
     // ---- Core ----
     private GraphicsDeviceManager _graphics;
     private ParticleSystem _particleSystem = new();
+    private EntityManager _entities = null!; // creatures in the current world; built and thrown away with it
+    private GameConsole _console = null!;    // the T / slash command line; also per world session
     private World _world = null!;
     private SpawnSequence _spawn = null!;
     private WindowManager _windowManager = null!;
@@ -107,6 +109,7 @@ public class Game1 : Game
         Window.TextInput += (_, e) =>
         {
             if (_state == GameState.MainMenu) _mainMenu.OnTextInput(e.Character);
+            else if (_state == GameState.Playing) _console?.OnTextInput(e.Character);
         };
     }
 
@@ -129,6 +132,7 @@ public class Game1 : Game
         _startup.AddStep("Resource packs", InitResourcePacks);
         _startup.AddStep("Window and fonts", InitWindowAndFonts);
         _startup.AddStep("Block registry", InitBlockRegistry);
+        _startup.AddStep("Entity models", () => EntityTypes.Initialize(GraphicsDevice));
         _startup.AddStep("Input and day/night", InitInputAndDayNight);
         _startup.AddStep("Audio", InitAudio);
         _startup.AddStep("Hotbar and HUD", InitHotbarAndHud);
@@ -325,8 +329,21 @@ public class Game1 : Game
 
         _blockInteraction = new BlockInteraction(_world, _player, _controller, _hotbar, _input, _particleSystem, _dayNight, _audioManager);
 
+        _entities = new EntityManager(GraphicsDevice, _world, _player);
+
         _renderer = new WorldRenderer(GraphicsDevice, _solidShader, _waterShader, TextureAtlas.Instance.Texture,
                                     _world, _controller, _blockInteraction, _particleSystem, _dayNight);
+        _renderer.Entities = _entities;
+
+        // Commands act on this session's world, player and entities
+        var commands = new CommandRegistry();
+        BuiltInCommands.Register(commands);
+        var commandContext = new CommandContext
+        {
+            World = _world, Player = _player, Controller = _controller, Entities = _entities, DayNight = _dayNight
+        };
+        _console = new GameConsole(GraphicsDevice, _menuFontSmall, commands, commandContext);
+        commandContext.Out = _console;
 
         // Initialized before Hotkeys so it is never null
         _panoramicManager = new ScreenshotPanoramicManager(GraphicsDevice, _renderer);
@@ -361,6 +378,10 @@ public class Game1 : Game
         _worldSave?.Dispose();
         _worldSave = null;
 
+        _console = null!;
+        _input.Blocked = false; // in case the console was open when the world was left
+        _entities.Dispose();
+        _entities = null!;
         _world = null!;
         _player = null!;
         _particleSystem = null!;
@@ -655,6 +676,10 @@ public class Game1 : Game
         var mouse = Mouse.GetState();
         _input.Update(kb, mouse);
 
+        // An open console owns the keyboard. Set before anything reads input, so Esc closes the console
+        // instead of pausing and typing "w" does not walk.
+        _input.Blocked = _console != null && _console.IsOpen;
+
         _gameNotice?.Update(dt);
 
         // Window mode works on every screen (menus included), so it's handled here rather than in Hotkeys,
@@ -730,15 +755,27 @@ public class Game1 : Game
             return;
         }
 
+        bool consoleWasOpen = _console.IsOpen;
+        _console.Update(dt, kb, _input);
+        _input.Blocked = _console.IsOpen; // opened this frame: the rest of the frame must not see the key that opened it
+
+        if (consoleWasOpen && !_console.IsOpen)
+        {
+            // Mouse movement while typing was not used for looking around; don't let it jump the camera now
+            InputManager.GetMouseDelta(out _, out _);
+        }
+
         _hotkeys.Update(dt, totalTime);
         _debugOverlay.Update();
         _dayNight.Update(dt);
         _world.SkyDarkness = _dayNight.SkyDarknessLevels;
-        _controller.Update(dt, IsActive);
+        _controller.Update(dt, IsActive && !_console.IsOpen);
         _screenEffects.Update(dt, new ScreenEffectContext(_world, _controller.CamPos, totalTime));
         _hotbar.Update();
         _blockInteraction.Update(dt, IsActive);
         _particleSystem.Update(dt, _world);
+
+        _entities.Update(dt, _world);
 
         _world.Update(GraphicsDevice, _controller.CamPos, totalTime);
 
@@ -828,5 +865,6 @@ public class Game1 : Game
         _hud.Draw();
         _debugOverlay.UpdateFps(gameTime);
         _debugOverlay.Draw();
+        _console.Draw(_sprites);
     }
 }

@@ -25,6 +25,9 @@ public sealed class WorldRenderer
 
     private readonly SkyRenderer _sky;
 
+    // The creatures to draw. Set by Game1 once the world session exists; null means none.
+    public EntityManager Entities { get; set; }
+
     // ---- ADD THESE TWO METHODS HERE ----
     public void SetProjection(Matrix projection) => _effect.Projection = projection;
     public Matrix CurrentProjection => _effect.Projection;
@@ -92,6 +95,7 @@ public sealed class WorldRenderer
         _sky.Draw(_effect.View, _effect.Projection, _dayNight);
 
         DrawSolid(viewProjection);
+        Entities?.Draw(_gd, _effect.View, _effect.Projection, frustum, _world, _dayNight);
         if (_interaction.HasTarget) DrawTargetOutline(_interaction.Target);
         _particles.Draw(_gd, _effect, frustum, right, up);
         DrawWater(viewProjection, totalTime);

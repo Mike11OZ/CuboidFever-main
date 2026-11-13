@@ -14,7 +14,14 @@ public static class GamePaths
     public static readonly string BlockTextureRoot =
         Path.Combine(AppContext.BaseDirectory, "assets", "cuboidfever", "textures", "block");
 
-    public static readonly string TextureAtlasConfig = Path.Combine(DataRoot, "texture_atlas.json");
+    // assets/cuboidfever/models/entity: Blockbench models (.bbmodel) of creatures, and their textures
+    public static readonly string EntityModelRoot =
+        Path.Combine(AppContext.BaseDirectory, "assets", "cuboidfever", "models", "entity");
+
+    public static readonly string EntityTextureRoot =
+        Path.Combine(AppContext.BaseDirectory, "assets", "cuboidfever", "textures", "entity");
+
+    public static readonly string TextureAtlasConfig =Path.Combine(DataRoot, "texture_atlas.json");
     public static readonly string DayNightConfig = Path.Combine(DataRoot, "daynight.json");
 
     // Everything the player owns lives in the user's app-data folder rather than next to the executable: the

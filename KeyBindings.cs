@@ -30,6 +30,8 @@ public sealed class KeyBindings
         [GameAction.ScrubTimeBack]    = Keys.OemComma,
         [GameAction.ScrubTimeForward] = Keys.OemPeriod,
         [GameAction.CycleRenderDistance] = Keys.R,
+        [GameAction.OpenConsole] = Keys.T,
+        [GameAction.OpenCommandConsole] = Keys.OemQuestion,
         [GameAction.ToggleHud] = Keys.F1,
         [GameAction.ToggleDebugOverlay] = Keys.F3,
         [GameAction.ScreenshotPanoramic] = Keys.F9,

@@ -15,8 +15,12 @@ public sealed class ActionInput
 
     public KeyBindings Bindings => _bindings;
 
+    // While true (the console is open and taking the keyboard) every action reads as not pressed and the wheel as
+    // not moved, so typing "w" does not walk and a click does not break a block.
+    public bool Blocked { get; set; }
+
     // How far the mouse wheel moved since the last frame (positive = scrolled up).
-    public int ScrollDelta => _mouse.ScrollWheelValue - _prevMouse.ScrollWheelValue;
+    public int ScrollDelta => Blocked ? 0 : _mouse.ScrollWheelValue - _prevMouse.ScrollWheelValue;
 
     // Cursor position in window coordinates. Only meaningful while the mouse is not captured
     // (InputManager.SetMouseCaptured(false)), i.e. in menus.
@@ -42,11 +46,13 @@ public sealed class ActionInput
     }
 
     // True every frame the input is held.
-    public bool IsDown(GameAction action) => IsDown(_bindings.Get(action), _kb, _mouse);
+    public bool IsDown(GameAction action) => !Blocked && IsDown(_bindings.Get(action), _kb, _mouse);
 
     // True only on the frame the input goes from up to down.
     public bool WasPressed(GameAction action)
     {
+        if (Blocked) return false;
+
         var b = _bindings.Get(action);
         return IsDown(b, _kb, _mouse) && !IsDown(b, _prevKb, _prevMouse);
     }
