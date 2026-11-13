@@ -1,0 +1,12 @@
+{
+  // Where HUD elements sit on the screen. Sizes and offsets are in design pixels (an 800x480 window)
+  // and are multiplied by the GUI scale in game.
+  //
+  // anchor: TopLeft, Top, TopRight, Left, Center, Right, BottomLeft, Bottom, BottomRight
+  //         The same point of the element is placed on that point of the screen.
+  // offsetX / offsetY: moved from the anchor. +X is right, +Y is down, so elements anchored to the
+  //         right or bottom edge need negative offsets to stay on screen.
+  "elements": {
+    "healthBar": { "anchor": "TopLeft", "offsetX": 16, "offsetY": 16, "width": 200, "height": 14 }
+  }
+}

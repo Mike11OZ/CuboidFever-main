@@ -226,7 +226,8 @@ public class Game1 : Game
     private void InitHotbarAndHud()
     {
         _hotbar = new Hotbar(BlockRegistry.Instance, _input);
-        _hud = new Hud(GraphicsDevice, _sprites, TextureAtlas.Instance.Texture, _hotbar);
+        _hud = new Hud(GraphicsDevice, _sprites, TextureAtlas.Instance.Texture, _hotbar,
+                       HudLayout.Load(GamePaths.HudLayoutConfig));
     }
 
     private void InitShaders()
@@ -304,6 +305,7 @@ public class Game1 : Game
             _dayNight.Scrub(0f); // brings the sky colors in line with the restored time
         }
         _player = new Player();
+        _hud.Player = _player;
 
         _particleSystem = new ParticleSystem();
         _particleSystem.Init(TextureAtlas.Instance);
@@ -384,6 +386,7 @@ public class Game1 : Game
         _entities = null!;
         _world = null!;
         _player = null!;
+        _hud.Player = null;
         _particleSystem = null!;
         _hotkeys = null!;
         _controller = null!;

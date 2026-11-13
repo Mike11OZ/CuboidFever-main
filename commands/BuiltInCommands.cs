@@ -68,6 +68,22 @@ public static class BuiltInCommands
 
         registry.Register(new Command
         {
+            Name = "damage",
+            Usage = "/damage <amount>",
+            Description = "Hurts you by that much (your health is 0 to 100). For testing the health bar.",
+            Run = (c, a) => ChangeHealth(c, a, "damage")
+        });
+
+        registry.Register(new Command
+        {
+            Name = "heal",
+            Usage = "/heal [amount]",
+            Description = "Heals you by that much, or all the way if no amount is given.",
+            Run = (c, a) => ChangeHealth(c, a, "heal")
+        });
+
+        registry.Register(new Command
+        {
             Name = "time",
             Usage = "/time query | /time set <sunrise|day|noon|sunset|night|midnight|HH:MM>",
             Description = "Shows or changes the time of day.",
@@ -227,6 +243,30 @@ public static class BuiltInCommands
             c.Out.Reply($"  {mob.Type.Id}, {Vector3.Distance(mob.Position, here):F1} blocks away: {mob.Goals.CurrentName}");
     }
 
+    // =====================  /damage and /heal  =====================
+
+    private static void ChangeHealth(CommandContext c, string[] a, string verb)
+    {
+        var health = c.Player.Health;
+
+        if (verb == "heal" && a.Length == 0)
+        {
+            health.Restore();
+        }
+        else
+        {
+            if (a.Length != 1 ||
+                !float.TryParse(a[0], NumberStyles.Float, CultureInfo.InvariantCulture, out float amount) ||
+                !float.IsFinite(amount) || amount <= 0f)
+                throw new CommandException(verb == "heal" ? "Usage: /heal [amount]" : "Usage: /damage <amount>");
+
+            if (verb == "heal") health.Heal(amount);
+            else health.Damage(amount);
+        }
+
+        c.Out.Reply($"Health: {health.Current:0.#} / {PlayerHealth.Max:0}");
+    }
+
     // =====================  /tp  =====================
 
     private static void Teleport(CommandContext c, string[] a)
@@ -239,6 +279,7 @@ public static class BuiltInCommands
 
         c.Player.Position = target;
         c.Player.Velocity = Vector3.Zero; // otherwise a fall in progress would carry on at its old speed
+        c.Player.ResetFall();             // and the fall damage counts from the new spot
 
         c.Out.Reply($"Teleported to {target.X:F1} {target.Y:F1} {target.Z:F1}.");
     }

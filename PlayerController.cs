@@ -46,6 +46,7 @@ public sealed class PlayerController
     public void Spawn(Vector3 feetPosition)
     {
         _player.Position = feetPosition;
+        _player.ResetFall();
         CamPos = _player.Eye;
     }
 
@@ -94,9 +95,24 @@ public sealed class PlayerController
         if (_player.Flying || groundLoaded)
             _player.Update(_world, dt, wish, jump, vertical);
 
-        if (_player.Position.Y < VoidY) _player.Position = RespawnPoint;
+        if (_player.Position.Y < VoidY) Respawn();
+
+        // Placeholder until there is a death screen: dying puts you back at the respawn point with full health
+        if (_player.Health.IsDead)
+        {
+            _player.Health.Restore();
+            Respawn();
+        }
 
         CamPos = _player.Eye;
+    }
+
+    // The respawn point is high in the air (the terrain height there is not known), so the fall down is forgiven.
+    private void Respawn()
+    {
+        _player.Position = RespawnPoint;
+        _player.Velocity = Vector3.Zero;
+        _player.ForgiveNextFall();
     }
 
     private void ApplyMouseLook()

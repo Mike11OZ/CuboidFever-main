@@ -19,6 +19,12 @@ public class Player
     private const float SurfaceHopSpeed = 6.5f; // jumping at the surface hops you out onto the shore
     private const float HeadCheckHeight = 1.4f; // swimming up stops once this point on the body leaves the water
 
+    public readonly PlayerHealth Health = new();
+
+    // Fall damage: the highest point of the current fall. Landing compares it with where the feet touch down.
+    private float _fallPeakY;
+    private bool _forgiveNextFall;
+
     public Vector3 Position;   // center of the feet
     public Vector3 Velocity;
     public bool OnGround;
@@ -39,6 +45,7 @@ public class Player
             Position += (wish * FlySpeed + new Vector3(0, vertical * FlySpeed, 0)) * dt;
             Velocity = Vector3.Zero;
             OnGround = false;
+            _fallPeakY = Position.Y; // flying never hurts, and a fall starts from wherever you stop flying
             return;
         }
 
@@ -76,6 +83,40 @@ public class Player
         Move(world, 0, Velocity.X * dt);
         Move(world, 1, Velocity.Y * dt);
         Move(world, 2, Velocity.Z * dt);
+
+        TrackFall();
+    }
+
+    // Forget any fall in progress, for when the player is moved somewhere (spawning, /tp).
+    public void ResetFall() => _fallPeakY = Position.Y;
+
+    // The next landing does no damage. For respawning, which drops the player from a point high above the world.
+    public void ForgiveNextFall()
+    {
+        _forgiveNextFall = true;
+        ResetFall();
+    }
+
+    // Follows the height of a fall and hurts the player when they land. Water breaks a fall.
+    private void TrackFall()
+    {
+        if (InWater)
+        {
+            _fallPeakY = Position.Y;
+            _forgiveNextFall = false;
+            return;
+        }
+
+        if (!OnGround)
+        {
+            _fallPeakY = MathF.Max(_fallPeakY, Position.Y);
+            return;
+        }
+
+        if (_forgiveNextFall) _forgiveNextFall = false;
+        else Health.Damage(FallDamage.Calculate(_fallPeakY - Position.Y));
+
+        _fallPeakY = Position.Y;
     }
 
     private static float MoveToward(float value, float target, float maxDelta) =>

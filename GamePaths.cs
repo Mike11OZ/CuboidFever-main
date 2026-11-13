@@ -24,6 +24,9 @@ public static class GamePaths
     public static readonly string TextureAtlasConfig =Path.Combine(DataRoot, "texture_atlas.json");
     public static readonly string DayNightConfig = Path.Combine(DataRoot, "daynight.json");
 
+    // Where each HUD element sits on the screen (HudLayout)
+    public static readonly string HudLayoutConfig = Path.Combine(DataRoot, "hud_layout.json");
+
     // Everything the player owns lives in the user's app-data folder rather than next to the executable: the
     // build output folder is wiped by a clean or rebuild, and that must never delete saves or resource packs.
     // (Windows: %APPDATA%\CuboidFever, Linux: ~/.config/CuboidFever)
